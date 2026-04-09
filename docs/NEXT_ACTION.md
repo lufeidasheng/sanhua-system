@@ -1,32 +1,66 @@
 # NEXT_ACTION
 
-## 当前主线程
-- 当前唯一施工工单：
-  - 本地运行环境访问边界收口：厘清宿主终端、Codex 执行环境与 localhost 可达性
-- 当前目标：
-  - 区分哪些执行入口能访问宿主 127.0.0.1:8080
-  - 区分代码问题与执行环境权限问题
-  - 给出后续最小运行方案
-- 当前占用文件：
-  - core/core2_0/sanhuatongyu/services/model_engine/register_actions_llamacpp.py
-  - entry/cli_entry/cli_entry.py
-  - modules/aicore_module/module.py
-  - core/core2_0/sanhuatongyu/context_factory.py
-- 验收标准：
-  - 明确失败发生在哪个执行环境
-  - 明确宿主终端 / 当前执行器 / GUI CLI 的访问边界
-  - 明确最小可行运行方式
-  - 不引入新的聊天主链漂移
+## 当前主目标
+推进“三花聚顶系统总控协作 V2”基础控制面落地，形成可持续的多施工位协作机制。
 
-## 副线程 A
-- desktop_notify / audio_consumer reason 已补齐，后续按需观察是否需要更细语义
-- 当前默认不施工
+---
 
-## 副线程 B
-- 多模块回答顺序按提问顺序返回
-- 当前默认不施工
+## 当前唯一主工单
+- 工单编号：V2-BOOT-001
+- 工单标题：总控协作 V2 控制面基线落库
+- 所属主链：总控协作 / 工单治理 / 控制面
+- 主执行位：2号（记录/回填位）
+- 状态：进行中
 
-## 冻结 / 预研池
-- music_module native_music_app / Apple Music 后端真实控制
-- 自动修复 / 自愈闭环
-- 更高效的多 Codex 协作方式继续探索
+---
+
+## 本工单目标
+1. 固化 AGENTS 协作规则
+2. 固化 COORDINATION_FLOW 协作流
+3. 初始化 NEXT_ACTION / TECH_DEBT 控制面
+4. 为 1号主施工位准备下一张真正代码工单
+
+---
+
+## 影响文件
+- AGENTS.md
+- docs/COORDINATION_FLOW.md
+- docs/NEXT_ACTION.md
+- docs/TECH_DEBT.md
+
+---
+
+## 完成定义（DoD）
+- 控制面文件已存在且内容可用
+- 角色分工清晰
+- 工单流转规则清晰
+- 下一张主施工工单可直接开做
+
+---
+
+## 下一张候选工单
+### 候选 A
+- 工单编号：V2-CORE-001
+- 标题：GUI Shell 边界再收敛，继续剥离非显示职责
+- 主执行位：1号
+
+### 候选 B
+- 工单编号：V2-DISPATCH-001
+- 标题：统一 dispatch_action / call_action 调用口径并补最小验证
+- 主执行位：1号
+
+### 候选 C
+- 工单编号：V2-MEM-001
+- 标题：记忆写回链路与 PromptMemoryBridge 边界复核
+- 主执行位：1号
+
+---
+
+## 当前建议
+优先开：
+`V2-DISPATCH-001`
+
+原因：
+- 它是总控闭环最核心的骨架之一
+- 能直接提升“系统统一调度”能力
+- 后续 GUI / Memory / Module 接入都会受益
