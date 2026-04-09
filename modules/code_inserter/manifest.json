@@ -1,0 +1,111 @@
+{
+  "name": "code_inserter",
+  "version": "1.1.0",
+  "author": "三花聚顶开发团队",
+  "author_contact": "support@sanhuajuding.com",
+  "description": "多语言代码插入、自动备份、差异比对与函数级插入，支持 marker/after_function 多种插入策略，适配主控/CLI/GUI。",
+  "license": "Apache-2.0",
+  "repository": "https://github.com/sanhuajuding/code_inserter",
+  "entry": "module.py",
+  "entry_class": "modules.code_inserter.module.OfficialCodeInserterModule",
+  "enabled": true,
+  "status": "active",
+  "categories": [
+    "tools",
+    "devops",
+    "automation",
+    "ai",
+    "code"
+  ],
+  "tags": [
+    "code-insert",
+    "marker",
+    "backup",
+    "diff",
+    "function-insert",
+    "multi-language",
+    "automation"
+  ],
+  "dependencies": [],
+  "actions": [
+    {
+      "name": "insert_code",
+      "display_name": "代码插入",
+      "description": "智能将代码片段插入指定源文件（支持 marker 或 after_function 策略），自动校验、备份和diff。",
+      "permission": "user",
+      "parameters": [
+        {
+          "name": "file_path",
+          "type": "string",
+          "description": "目标文件路径"
+        },
+        {
+          "name": "insert_code",
+          "type": "string",
+          "description": "要插入的代码内容"
+        },
+        {
+          "name": "marker",
+          "type": "string",
+          "optional": true,
+          "default": "# >>> 插入点",
+          "description": "插入点标记（可选）"
+        },
+        {
+          "name": "auto_save",
+          "type": "boolean",
+          "optional": true,
+          "default": false,
+          "description": "是否自动保存（可选）"
+        },
+        {
+          "name": "insertion_strategy",
+          "type": "string",
+          "optional": true,
+          "default": "marker",
+          "description": "插入策略（marker 或 after_function，默认为 marker）"
+        },
+        {
+          "name": "function_name",
+          "type": "string",
+          "optional": true,
+          "description": "当使用 after_function 时的函数名"
+        }
+      ],
+      "returns": {
+        "type": "object",
+        "description": "操作详细结果（status, diff, backup, validation, message, details等）"
+      },
+      "entrypoint": "insert_code"
+    }
+  ],
+  "events": [],
+  "config_schema": {
+    "backup_dir": {
+      "type": "string",
+      "default": "~/.aicore/backups",
+      "description": "代码插入自动备份目录"
+    }
+  },
+  "market_compatible": false,
+  "display_name": "三花聚顶 · 代码插入器",
+  "visibility": "core",
+  "debug_only": false,
+  "hotplug": true,
+  "entrypoints": [
+    "insert_code",
+    "register_actions"
+  ],
+  "interfaces": [
+    "BaseModule",
+    "ActionDispatcher"
+  ],
+  "compatibility": [
+    "三花聚顶主控",
+    "三花聚顶CLI",
+    "三花聚顶GUI旗舰入口",
+    "AI/LLM自动化工具链"
+  ],
+  "last_update": "2025-08-08T12:00:00+08:00",
+  "is_entry": true
+}

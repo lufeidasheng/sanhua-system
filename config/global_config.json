@@ -1,0 +1,36 @@
+{
+  "event_bus": {
+    "thread_pool_size": 10,
+    "max_listeners": 100,
+    "global_rate_limit": 1000,
+    "per_event_rate_limit": 100
+  },
+  "access_control_roles": {
+    "system": ["*"],
+    "admin": ["event.*", "config.*"],
+    "module": ["event.publish", "event.subscribe"],
+    "user": ["event.subscribe"],
+    "guest": []
+  },
+  "event_permissions": {
+    "CONFIG_UPDATE": "config.update",
+    "MODULE_LOAD": "module.manage",
+    "SYSTEM_SHUTDOWN": "system.control"
+  },
+  "modules": {
+    "audio_capture": {
+      "enabled": true,
+      "debug_only": false,
+      "entry_points": ["cli_entry"]
+    },
+    "audio_consumer": {
+      "enabled": true,
+      "debug_only": false,
+      "entry_points": ["cli_entry"]
+    }
+  },
+  "logging": {
+    "level": "INFO",
+    "file": "logs/sanhua.log"
+  }
+}

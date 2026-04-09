@@ -1,0 +1,111 @@
+{
+  "name": "model_engine_actions",
+  "version": "1.0.0",
+  "author": "三花聚顶开发团队",
+  "author_contact": "support@sanhuajuding.com",
+  "description": "提供模型扫描、当前模型查看与模型切换能力，统一模型调用管理。",
+  "license": "Apache-2.0",
+  "repository": "",
+  "entry": "module.py",
+  "entry_class": "modules.model_engine_actions.module.OfficialModelEngineActionsModule",
+  "enabled": true,
+  "status": "active",
+  "categories": [
+    "core",
+    "model",
+    "engine",
+    "backend",
+    "local-ai"
+  ],
+  "tags": [
+    "模型管理",
+    "本地推理",
+    "llama.cpp",
+    "模型切换",
+    "自动扫描"
+  ],
+  "dependencies": [
+    "core.aicore.aicore",
+    "core.core2_0.sanhuatongyu.services.model_engine.engine",
+    "core.core2_0.sanhuatongyu.action_dispatcher"
+  ],
+  "actions": [
+    {
+      "name": "model.list",
+      "display_name": "列出模型",
+      "description": "扫描 models 目录并返回所有可用模型文件。",
+      "permission": "user",
+      "returns": {
+        "type": "list",
+        "description": "模型文件列表"
+      },
+      "entrypoint": "ModelEngineActionsModule.action_list_models"
+    },
+    {
+      "name": "model.select",
+      "display_name": "切换模型",
+      "description": "将当前推理模型切换为指定模型。",
+      "permission": "admin",
+      "parameters": [
+        {
+          "name": "name",
+          "type": "string",
+          "description": "模型文件名"
+        }
+      ],
+      "returns": {
+        "type": "string",
+        "description": "状态信息"
+      },
+      "entrypoint": "ModelEngineActionsModule.action_select_model"
+    },
+    {
+      "name": "model.current",
+      "display_name": "当前模型",
+      "description": "获取当前正在使用的模型名称。",
+      "permission": "user",
+      "returns": {
+        "type": "string",
+        "description": "模型路径或名称"
+      },
+      "entrypoint": "ModelEngineActionsModule.action_current_model"
+    }
+  ],
+  "events": [
+    {
+      "name": "model.changed",
+      "description": "当模型切换时发出，用于 GUI 侧刷新展示。"
+    }
+  ],
+  "config_schema": {
+    "auto_refresh_interval_sec": {
+      "type": "int",
+      "default": 10,
+      "description": "GUI 自动刷新模型状态间隔"
+    }
+  },
+  "market_compatible": true,
+  "display_name": "模型引擎管理模块",
+  "visibility": "core",
+  "debug_only": false,
+  "hotplug": true,
+  "entrypoints": [
+    "preload",
+    "setup",
+    "start",
+    "stop",
+    "cleanup"
+  ],
+  "interfaces": [
+    "QuantumActionDispatcher",
+    "ModelEngine",
+    "UI",
+    "GUI"
+  ],
+  "compatibility": [
+    "三花聚顶CLI旗舰入口",
+    "三花聚顶GUI旗舰入口",
+    "RemoteAPI/Web接口"
+  ],
+  "last_update": "2025-11-01T12:00:00+08:00"
+}

@@ -1,0 +1,18 @@
+{
+  "name": "cli_entry",
+  "version": "1.0.0",
+  "description": "三花聚顶系统 CLI 交互模块",
+  "entry": "cli_main.py",
+  "entry_function": "entry",
+  "initialize_function": "initialize",
+  "cleanup_function": "cleanup",
+  "register_actions_function": "register_actions",
+  "event_handlers": {
+    "module.loaded": "on_module_loaded",
+    "system.alert": "event_handlers.system.alert"
+  },
+  "dependencies": [],
+  "author": "你的名字或团队",
+  "license": "MIT",
+  "keywords": ["cli", "command", "shell", "三花聚顶"]
+}

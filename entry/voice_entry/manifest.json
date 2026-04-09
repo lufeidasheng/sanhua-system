@@ -1,0 +1,20 @@
+{
+    "name": "voice_entry",
+    "version": "1.0.0",
+    "description": "语音入口模块 - 唤醒词监听 → 语音转写 → 意图解析",
+    "entry_points": [
+        "voice"
+    ],
+    "visibility": "interface",
+    "dependencies": [],
+    "enabled": true,
+    "config": {
+        "wake_word": "三花聚顶",
+        "whisper_model": "tiny",
+        "max_record_duration": 10
+    },
+    "entry_point": "voice_entry.py:main",
+    "is_entry": true,
+    "author": "Auto-Gen",
+    "id": "voice_entry"
+}

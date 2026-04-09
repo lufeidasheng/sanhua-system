@@ -1,0 +1,77 @@
+{
+  "name": "douyin_web",
+  "version": "1.2.0",
+  "title": "三花聚顶 · douyin_web 抖音网页版旗舰模块（系统浏览器版）",
+  "author": "三花聚顶开发团队",
+  "author_contact": "support@sanhuajuding.com",
+  "description": "通过系统默认浏览器打开抖音网页版，支持健康检查、别名快捷唤起和AI副驾扩展，占用资源极低，兼容最广泛桌面环境。",
+  "license": "MIT",
+  "repository": "https://github.com/sanhuajuding/douyin_web",
+  "entry": "module.py",
+  "entry_class": "modules.douyin_web.module.DouyinWebModule",
+  "enabled": true,
+  "entry_points": [
+    "core",
+    "gui"
+  ],
+  "icon": "🎬",
+  "health_check": true,
+  "hot_pluggable": true,
+  "singleton": true,
+  "status": "stable",
+  "categories": [
+    "browser",
+    "media",
+    "ai-assist",
+    "webview",
+    "enterprise"
+  ],
+  "tags": [
+    "抖音",
+    "web",
+    "系统浏览器",
+    "AI副驾",
+    "热插拔",
+    "gui",
+    "娱乐"
+  ],
+  "dependencies": [],
+  "actions": [
+    {
+      "name": "open_douyin",
+      "description": "通过系统默认浏览器打开抖音网页版",
+      "permission": "user",
+      "aliases": [
+        "打开抖音",
+        "刷抖音",
+        "看抖音",
+        "启动抖音",
+        "抖音"
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "douyin.open",
+      "description": "唤起/打开抖音网页版事件"
+    },
+    {
+      "name": "module.loaded",
+      "description": "模块加载完成事件"
+    },
+    {
+      "name": "module.unloaded",
+      "description": "模块卸载事件"
+    }
+  ],
+  "config_schema": {
+    "homepage_url": {
+      "type": "string",
+      "default": "https://www.douyin.com",
+      "description": "抖音主页URL（如有需可切换其他短视频服务）"
+    }
+  },
+  "market_compatible": true,
+  "upgrade_url": "https://github.com/sanhuajuding/douyin_web/releases/latest",
+  "is_entry": true
+}

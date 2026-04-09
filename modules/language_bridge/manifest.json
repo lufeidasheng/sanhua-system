@@ -1,0 +1,123 @@
+{
+  "name": "language_bridge",
+  "version": "3.2",
+  "title": "三花聚顶 · 跨语言桥接模块（Language Bridge）",
+  "author": "三花聚顶开发团队",
+  "description": "跨语言桥接模块：统一调用与管控外部可执行体及多语言插件（Python ↔ Rust/Go/C++/任意运行时），支持沙箱、健康检查、熔断、热更新和事件总线。",
+  "license": "MIT",
+  "entry": "module.py",
+  "entry_class": "modules.language_bridge.module.LanguageBridgeModule",
+  "enabled": true,
+  "entry_points": [
+    "core",
+    "gui"
+  ],
+  "icon": "🛰️",
+  "health_check": true,
+  "hot_pluggable": true,
+  "singleton": true,
+  "status": "stable",
+  "categories": [
+    "bridge",
+    "runtime",
+    "integration",
+    "dev-tools"
+  ],
+  "tags": [
+    "language-bridge",
+    "sandbox",
+    "multi-runtime",
+    "integration",
+    "cross-language"
+  ],
+  "dependencies": [
+    "psutil"
+  ],
+  "actions": [
+    {
+      "name": "bridge.call",
+      "description": "调用外部桥接器（跨语言）",
+      "permission": "user",
+      "aliases": [
+        "执行桥接",
+        "调用外部程序"
+      ]
+    },
+    {
+      "name": "bridge.health",
+      "description": "桥接模块健康检查",
+      "permission": "user",
+      "aliases": [
+        "检查桥接健康",
+        "桥接状态"
+      ]
+    },
+    {
+      "name": "bridge.reload_config",
+      "description": "重载桥接配置",
+      "permission": "admin",
+      "aliases": [
+        "刷新桥接配置",
+        "重新加载配置"
+      ]
+    },
+    {
+      "name": "bridge.reset_cb",
+      "description": "重置熔断器",
+      "permission": "admin",
+      "aliases": [
+        "熔断重置",
+        "恢复桥接器"
+      ]
+    },
+    {
+      "name": "bridge.list",
+      "description": "列出可用桥接器",
+      "permission": "user",
+      "aliases": [
+        "可用桥接列表",
+        "查看桥接器"
+      ]
+    },
+    {
+      "name": "bridge.runtimes",
+      "description": "检测运行时环境",
+      "permission": "user",
+      "aliases": [
+        "检测环境",
+        "运行时检测"
+      ]
+    }
+  ],
+  "config_schema": {
+    "sandbox_mode": {
+      "type": "string",
+      "enum": [
+        "auto",
+        "docker",
+        "firejail",
+        "none"
+      ],
+      "default": "auto"
+    },
+    "config_path": {
+      "type": "string",
+      "default": "modules/language_bridge/bridges/config.json"
+    },
+    "circuit_breaker": {
+      "type": "object",
+      "properties": {
+        "failure_threshold": {
+          "type": "integer",
+          "default": 5
+        },
+        "reset_timeout": {
+          "type": "integer",
+          "default": 60
+        }
+      }
+    }
+  },
+  "market_compatible": true,
+  "is_entry": true
+}

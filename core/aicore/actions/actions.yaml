@@ -1,0 +1,60 @@
+# 中文意图与动作函数名映射表
+- name: 播放音乐
+  keywords: ["播放音乐", "来点音乐", "放歌" ,"音乐时间"]
+  function: play_music
+
+- name: 查看记忆
+  keywords: ["查看记忆", "回顾记忆"]
+  function: view_memory
+
+- name: 重启系统
+  keywords: ["重启系统", "重新启动"]
+  function: reboot_system
+
+- name: 关机
+  keywords: ["关机", "关闭电脑", "我要关机"]
+  function: shutdown
+
+- name: 开蓝牙
+  keywords: ["打开蓝牙", "启动蓝牙"]
+  function: enable_bluetooth
+
+- name: 关蓝牙
+  keywords: ["关闭蓝牙", "停止蓝牙"]
+  function: disable_bluetooth
+
+- name: 连接战术耳机
+  keywords: ["连接耳机", "连接战术耳机", "连接战术耳机max"]
+  function: connect_headset
+
+- name: 下一曲
+  keywords: ["下一首", "下一曲", "跳过歌曲"]
+  function: next_song
+
+- name: 上一曲
+  keywords: ["上一首", "上一曲", "回到上一首"]
+  function: previous_song
+
+- name: 停止播放
+  keywords: ["停止播放", "停止音乐"]
+  function: stop_music
+
+- name: 暂停播放
+  keywords: ["暂停播放", "暂停音乐"]
+  function: pause_music
+
+- name: 单曲循环播放开
+  keywords: ["开启单曲循环", "单曲循环"]
+  function: loop_one_on
+
+- name: 单曲循环播放关
+  keywords: ["关闭单曲循环"]
+  function: loop_one_off
+
+- name: 打开视频
+  keywords: ["播放视频", "打开视频文件", "打开电影"]
+  function: play_video_file
+
+- name: 停止助手
+  keywords: ["关闭助手", "退出", "关机"]
+  function: shutdown_assistant

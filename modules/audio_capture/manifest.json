@@ -1,0 +1,103 @@
+{
+  "name": "audio_capture",
+  "version": "1.1.0",
+  "author": "三花聚顶开发团队",
+  "description": "基于PyAudio的多进程音频采集模块，支持静音检测、热切换、事件驱动与全局动作注册。",
+  "license": "MIT",
+  "entry": "module.py",
+  "entry_class": "modules.audio_capture.module.AudioCapture",
+  "enabled": true,
+  "status": "active",
+  "dependencies": [
+    "pyaudio",
+    "numpy"
+  ],
+  "actions": [
+    {
+      "name": "audio_capture.start",
+      "description": "启动音频采集进程",
+      "permission": "user"
+    },
+    {
+      "name": "audio_capture.stop",
+      "description": "停止音频采集进程",
+      "permission": "user"
+    },
+    {
+      "name": "audio_capture.list_devices",
+      "description": "获取可用音频输入设备",
+      "permission": "user"
+    }
+  ],
+  "events": [
+    {
+      "name": "audio_capture.started",
+      "description": "音频采集进程已启动"
+    },
+    {
+      "name": "audio_capture.stopped",
+      "description": "音频采集进程已停止"
+    },
+    {
+      "name": "audio_capture.silence_detected",
+      "description": "检测到静音"
+    },
+    {
+      "name": "audio_capture.sound_detected",
+      "description": "检测到声音"
+    },
+    {
+      "name": "audio_capture.device_changed",
+      "description": "音频输入设备切换"
+    }
+  ],
+  "config_schema": {
+    "rate": {
+      "type": "integer",
+      "default": 16000,
+      "description": "采样率"
+    },
+    "chunk": {
+      "type": "integer",
+      "default": 1024,
+      "description": "音频块大小"
+    },
+    "channels": {
+      "type": "integer",
+      "default": 1,
+      "description": "通道数"
+    },
+    "device_index": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "default": null,
+      "description": "输入设备索引"
+    },
+    "queue_maxsize": {
+      "type": "integer",
+      "default": 300,
+      "description": "队列最大长度"
+    },
+    "buffer_seconds": {
+      "type": "number",
+      "default": 5.0,
+      "description": "静音检测缓冲时长（秒）"
+    },
+    "silence_threshold": {
+      "type": "integer",
+      "default": 200,
+      "description": "静音振幅阈值"
+    },
+    "enable_silence_detection": {
+      "type": "boolean",
+      "default": true,
+      "description": "是否启用静音检测"
+    }
+  },
+  "market_compatible": true,
+  "visibility": "service",
+  "debug_only": false,
+  "is_entry": true
+}

@@ -1,0 +1,199 @@
+{
+  "name": "system_control",
+  "version": "2.1.1",
+  "title": "三花聚顶 · 企业版系统控制模块",
+  "author": "徐鹏鹏",
+  "author_contact": "pengpeng.xu@example.com",
+  "description": "提供企业级系统控制能力，包括电源、会话、网络、蓝牙、音量、亮度、桌面交互、文件与媒体操作，采用最小权限执行与安全审计。",
+  "license": "Apache-2.0",
+  "repository": "https://example.com/your-repo/system_control",
+  "entry": "module.py",
+  "entry_class": "modules.system_control.module.OfficialSystemControlModule",
+  "enabled": true,
+  "entry_points": [
+    "cli",
+    "gui"
+  ],
+  "icon": "icon.png",
+  "health_check": true,
+  "hot_pluggable": true,
+  "singleton": true,
+  "status": "stable",
+  "categories": [
+    "System",
+    "Control",
+    "Utilities"
+  ],
+  "tags": [
+    "system",
+    "control",
+    "power",
+    "network",
+    "bluetooth",
+    "audio",
+    "brightness"
+  ],
+  "dependencies": [],
+  "actions": [
+    {
+      "name": "sys.reboot",
+      "description": "安全重启系统",
+      "permission": "user"
+    },
+    {
+      "name": "sys.poweroff",
+      "description": "安全关机系统",
+      "permission": "user"
+    },
+    {
+      "name": "sys.lock",
+      "description": "锁屏",
+      "permission": "user"
+    },
+    {
+      "name": "sys.logout",
+      "description": "注销会话",
+      "permission": "user"
+    },
+    {
+      "name": "sys.suspend",
+      "description": "挂起系统",
+      "permission": "user"
+    },
+    {
+      "name": "sys.display_off",
+      "description": "关闭显示器",
+      "permission": "user"
+    },
+    {
+      "name": "sys.net.reload",
+      "description": "重载网络配置",
+      "permission": "user"
+    },
+    {
+      "name": "sys.wifi.on",
+      "description": "开启WiFi",
+      "permission": "user"
+    },
+    {
+      "name": "sys.wifi.off",
+      "description": "关闭WiFi",
+      "permission": "user"
+    },
+    {
+      "name": "sys.wifi.switch",
+      "description": "切换WiFi SSID",
+      "permission": "user"
+    },
+    {
+      "name": "sys.bt.on",
+      "description": "开启蓝牙",
+      "permission": "user"
+    },
+    {
+      "name": "sys.bt.off",
+      "description": "关闭蓝牙",
+      "permission": "user"
+    },
+    {
+      "name": "sys.bt.connect",
+      "description": "连接蓝牙设备",
+      "permission": "user"
+    },
+    {
+      "name": "sys.volume.up",
+      "description": "音量增加",
+      "permission": "user"
+    },
+    {
+      "name": "sys.volume.down",
+      "description": "音量降低",
+      "permission": "user"
+    },
+    {
+      "name": "sys.volume.mute",
+      "description": "静音",
+      "permission": "user"
+    },
+    {
+      "name": "sys.volume.unmute",
+      "description": "取消静音",
+      "permission": "user"
+    },
+    {
+      "name": "sys.brightness.up",
+      "description": "亮度增加",
+      "permission": "user"
+    },
+    {
+      "name": "sys.brightness.down",
+      "description": "亮度降低",
+      "permission": "user"
+    },
+    {
+      "name": "sys.open.url",
+      "description": "用默认浏览器打开URL",
+      "permission": "user"
+    },
+    {
+      "name": "sys.open.file",
+      "description": "用默认应用打开文件",
+      "permission": "user"
+    },
+    {
+      "name": "sys.media.play",
+      "description": "播放媒体文件",
+      "permission": "user"
+    }
+  ],
+  "events": [
+    {
+      "name": "system.reboot",
+      "description": "系统重启事件"
+    },
+    {
+      "name": "system.poweroff",
+      "description": "系统关机事件"
+    },
+    {
+      "name": "system.lock",
+      "description": "锁屏事件"
+    },
+    {
+      "name": "system.logout",
+      "description": "注销事件"
+    },
+    {
+      "name": "system.suspend",
+      "description": "挂起事件"
+    },
+    {
+      "name": "system.display_off",
+      "description": "关闭显示器事件"
+    }
+  ],
+  "config_schema": {
+    "pkexec_enabled": {
+      "type": "boolean",
+      "default": true,
+      "description": "是否启用 pkexec 提升权限执行系统命令"
+    },
+    "bluetooth_cache_time": {
+      "type": "integer",
+      "default": 300,
+      "description": "蓝牙设备缓存有效期（秒）"
+    },
+    "brightness_step": {
+      "type": "integer",
+      "default": 5,
+      "description": "亮度调整步进百分比"
+    },
+    "volume_step": {
+      "type": "integer",
+      "default": 5,
+      "description": "音量调整步进百分比"
+    }
+  },
+  "market_compatible": true,
+  "is_entry": true
+}

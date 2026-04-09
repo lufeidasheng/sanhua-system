@@ -1,0 +1,80 @@
+{
+  "name": "code_reviewer",
+  "version": "2.2.1",
+  "title": "三花聚顶 · code_reviewer 代码审查模块",
+  "author": "三花聚顶开发团队",
+  "author_contact": "support@sanhuajuding.com",
+  "description": "本地代码的安全/风格/复杂度/依赖/合规综合审查，缺依赖自动降级。",
+  "license": "MIT",
+  "repository": "https://github.com/sanhuajuding/code_reviewer",
+  "entry": "module.py",
+  "entry_class": "modules.code_reviewer.module.OfficialCodeReviewerModule",
+  "enabled": true,
+  "entry_points": [
+    "core",
+    "gui"
+  ],
+  "icon": "🛡️",
+  "health_check": true,
+  "hot_pluggable": true,
+  "singleton": false,
+  "status": "stable",
+  "categories": [
+    "devtools",
+    "security",
+    "quality"
+  ],
+  "tags": [
+    "bandit",
+    "flake8",
+    "pycodestyle",
+    "ruff",
+    "radon",
+    "fedora"
+  ],
+  "dependencies": [],
+  "actions": [
+    {
+      "name": "code_reviewer.review_code",
+      "description": "审查单文件",
+      "permission": "user",
+      "aliases": [
+        "代码审查",
+        "检查代码",
+        "文件审查"
+      ]
+    },
+    {
+      "name": "code_reviewer.review_path",
+      "description": "并发审查目录",
+      "permission": "user",
+      "aliases": [
+        "目录审查",
+        "批量代码检查"
+      ]
+    },
+    {
+      "name": "code_reviewer.format_code",
+      "description": "格式化代码",
+      "permission": "user",
+      "aliases": [
+        "代码格式化",
+        "格式优化"
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "module.loaded",
+      "description": "模块加载完成事件"
+    },
+    {
+      "name": "module.unloaded",
+      "description": "模块卸载事件"
+    }
+  ],
+  "config_schema": {},
+  "market_compatible": true,
+  "upgrade_url": "https://github.com/sanhuajuding/code_reviewer/releases/latest",
+  "is_entry": true
+}

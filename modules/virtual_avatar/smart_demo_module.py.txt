@@ -1,0 +1,339 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+🌸 三花聚顶 · virtual_avatar（企业级虚拟形象入口模块 · Fedora 优化）
+- 动画包加载（assets/avatars/<avatar_id>/animations.json）
+- 事件驱动（事件→动作/表情映射）
+- GUI/渲染器对接（统一 gui_notify / render_action 出口）
+- 语音联动（存在 tts.speak 动作则播报）
+- 健康检查 / 安全关闭 / Fedora 优化
+"""
+
+from __future__ import annotations
+import os
+import sys
+import json
+import time
+import asyncio
+import logging
+from typing import Dict, Optional, Callable, Any, List, Tuple
+
+# ====== 环境与日志 ======
+IS_FEDORA = os.path.exists("/etc/fedora-release")
+logger = logging.getLogger("virtual_avatar")
+if not logger.hasHandlers():
+    _h = logging.StreamHandler()
+    _h.setFormatter(logging.Formatter(
+        f"[%(asctime)s][{'Fedora' if IS_FEDORA else 'System'}][%(name)s][%(levelname)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S"
+    ))
+    logger.addHandler(_h)
+logger.setLevel(logging.INFO)
+
+# ====== 元数据（供模块管理器读取）======
+__metadata__ = {
+    "id": "virtual_avatar",
+    "name": "虚拟形象入口模块（Fedora 优化）",
+    "version": "2.1",
+    "dependencies": [],
+    "init": "init",
+    "entry": "start",
+    "events": [
+        "system_shutdown", "user_command", "performance_alert", "fedora_update",
+        "avatar.say", "avatar.play", "avatar.pose", "avatar.emote"
+    ],
+    "fedora_optimized": IS_FEDORA,
+    "enterprise_features": {
+        "high_availability": True,
+        "resource_monitoring": True,
+        "safe_shutdown": True
+    }
+}
+
+# ====== 动画包 / 资源定位 ======
+BASE_DIR = os.path.dirname(__file__)
+ASSETS_DIR = os.path.abspath(os.path.join(BASE_DIR, "../../assets"))
+AVATAR_ROOT = os.path.join(ASSETS_DIR, "avatars")
+DEFAULT_AVATAR_ID = "default"  # 你可以在配置里改
+
+# 动画包协议：assets/avatars/<avatar_id>/
+#   - animations.json  (动作清单)
+#   - sprites/         (2D 序列帧 / 贴图)
+#   - models/          (3D 模型/动作)
+#   - audio/           (表情音效/提示音，可选)
+
+# ====== 运行时状态 ======
+current_task: Optional[asyncio.Task] = None
+required_resource: Optional[str] = None
+system_stats: Dict[str, Any] = {}
+renderer_callbacks: Dict[str, Callable[..., Any]] = {}  # 由 GUI 注入：render_action / show_toast 等
+action_dispatcher = None  # 由上层 context 注入（用于 tts.speak 等动作调用）
+
+# 事件→动作映射（可被动画包或配置覆写）
+EVENT_ACTION_MAP: Dict[str, str] = {
+    "system_shutdown": "emote_warning",
+    "performance_alert": "emote_warning",
+    "user_command": "wave",
+    "fedora_update": "fedora_spin",
+    "avatar.say": "talk",
+    "avatar.play": "play",
+    "avatar.pose": "pose",
+    "avatar.emote": "emote_warning"
+}
+
+# 有效动画名集合（由动画包加载）
+VALID_ANIMATIONS: set = set()
+
+# ====== GUI / 渲染对接 ======
+def inject_renderer(render_action: Optional[Callable[..., Any]] = None,
+                    show_toast: Optional[Callable[..., Any]] = None]):
+    """供外部 GUI 注入回调"""
+    if render_action:
+        renderer_callbacks["render_action"] = render_action
+    if show_toast:
+        renderer_callbacks["show_toast"] = show_toast
+
+def gui_notify(message: str, level: str = "info", animation: Optional[str] = None):
+    """统一 GUI 提示 & 动画调用（无回调时降级为日志）"""
+    prefix = "[Fedora]" if IS_FEDORA else "[System]"
+    full = f"{prefix} {message}"
+    logger.info(f"[GUI][{level}] {full}")
+    # toast
+    cb = renderer_callbacks.get("show_toast")
+    try:
+        if cb:
+            cb(full, level=level)
+    except Exception as e:
+        logger.warning(f"show_toast 调用失败：{e}")
+
+    # 动画（若提供）
+    if animation:
+        play_animation(animation, meta={"source": "gui_notify"})
+
+def play_animation(name: str, meta: Optional[Dict[str, Any]] = None):
+    """请求渲染器播放动画；无渲染器则记录日志"""
+    if name not in VALID_ANIMATIONS:
+        logger.warning(f"动画不存在或未注册：{name}")
+        return False
+    cb = renderer_callbacks.get("render_action")
+    if not cb:
+        logger.info(f"[渲染占位] 播放动画：{name}，元信息：{meta or {}}（未注入渲染器，已忽略）")
+        return True
+    try:
+        cb(action=name, meta=meta or {})
+        return True
+    except Exception as e:
+        logger.error(f"render_action 失败：{e}")
+        return False
+
+# ====== 动画包加载 ======
+def _load_animation_pack(avatar_id: str) -> Tuple[set, Dict[str, Any]]:
+    """读取 animations.json，返回动画集合与原始定义"""
+    pack_dir = os.path.join(AVATAR_ROOT, avatar_id)
+    manifest = os.path.join(pack_dir, "animations.json")
+    animations: set = set()
+    data: Dict[str, Any] = {}
+    if not os.path.exists(manifest):
+        logger.warning(f"未找到动画清单：{manifest}，将仅使用内置占位动作")
+        return set({"wave", "talk", "emote_warning", "pose_idle", "fedora_spin", "success_burst", "fade_in", "fade_out"}), {}
+    try:
+        with open(manifest, "r", encoding="utf-8") as f:
+            data = json.load(f) or {}
+        for name, spec in data.get("actions", {}).items():
+            animations.add(name)
+    except Exception as e:
+        logger.error(f"加载动画包失败：{e}")
+        animations = set({"wave", "talk", "emote_warning", "pose_idle", "fedora_spin", "success_burst", "fade_in", "fade_out"})
+    return animations, data
+
+def _apply_event_overrides(pack_data: Dict[str, Any]):
+    """允许动画包覆盖事件映射"""
+    overrides = (pack_data or {}).get("event_map") or {}
+    if overrides:
+        EVENT_ACTION_MAP.update(overrides)
+        logger.info(f"已应用事件映射覆盖：{list(overrides.keys())}")
+
+# ====== 语音联动 ======
+def _speak_if_available(text: str, lang: str = "zh"):
+    """存在 tts.speak 则联动播报"""
+    global action_dispatcher
+    if not action_dispatcher:
+        return
+    try:
+        actions = action_dispatcher.list_actions(detailed=True)
+        if any(a.get("name") == "tts.speak" for a in actions):
+            action_dispatcher.execute("tts.speak", params={"text": text, "lang": lang})
+    except Exception as e:
+        logger.debug(f"TTS 联动失败：{e}")
+
+# ====== 事件处理 ======
+async def on_event(event_type: str, data: dict):
+    """对外事件入口"""
+    logger.info(f"[Event] {event_type} -> {data}")
+    system_stats["event_count"] = system_stats.get("event_count", 0) + 1
+    system_stats["last_event"] = time.time()
+
+    # 统一映射为动画名
+    action_name = EVENT_ACTION_MAP.get(event_type)
+    if not action_name:  # 未配置
+        gui_notify(f"未支持的事件: {event_type}", level="warning")
+        return
+
+    # 处理内置几个示例
+    if event_type == "system_shutdown":
+        gui_notify("系统即将关闭，准备安全收尾…", level="warning", animation=action_name)
+
+    elif event_type == "performance_alert":
+        alert_type = data.get("alert_type", "generic")
+        gui_notify(f"性能警报：{alert_type}", level="critical", animation=action_name)
+
+    elif event_type == "fedora_update" and IS_FEDORA:
+        ver = data.get("version", "unknown")
+        gui_notify(f"Fedora 更新：{ver}", animation="fedora_spin")
+
+    elif event_type == "avatar.say":
+        text = data.get("text", "")
+        if text:
+            _speak_if_available(text)
+            gui_notify(f"语音：{text}", level="info", animation="talk")
+
+    # 播放映射动画（若无渲染器则降级日志）
+    play_animation(action_name, meta={"event": event_type, "data": data})
+
+# ====== 生命周期 ======
+async def init(context: Optional[Dict[str, Any]] = None) -> bool:
+    """初始化：加载动画包、注入调度器等"""
+    global required_resource, action_dispatcher, VALID_ANIMATIONS
+    logger.info(f"{__metadata__['name']} v{__metadata__['version']} 初始化…")
+
+    # 注入 dispatcher（用于联动 TTS 等）
+    action_dispatcher = None
+    if context and hasattr(context, "action_dispatcher"):
+        action_dispatcher = context.action_dispatcher
+
+    # 动画包 id
+    avatar_id = (context.get("config", {}) or {}).get("avatar_id", DEFAULT_AVATAR_ID) if isinstance(context, dict) else DEFAULT_AVATAR_ID
+    VALID_ANIMATIONS, pack = _load_animation_pack(avatar_id)
+    _apply_event_overrides(pack)
+
+    # 资源占位
+    required_resource = f"avatar:{avatar_id}"
+    system_stats.update({
+        "start_time": time.time(),
+        "avatar_id": avatar_id,
+        "event_count": 0,
+        "last_event": None
+    })
+
+    gui_notify("虚拟形象加载完成", animation="fade_in")
+    return True
+
+async def start(config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """启动：播放欢迎动作；可接收启动脚本"""
+    try:
+        if not required_resource:
+            return {"status": "fail", "msg": "资源未初始化"}
+        script = (config or {}).get("startup_script", [])
+        gui_notify("虚拟形象上线～", animation="pose_idle")
+        # 可选：按脚本预演一组动作
+        if isinstance(script, list) and script:
+            async def _run_script(seq: List[str]):
+                for act in seq:
+                    play_animation(act, meta={"source": "startup_script"})
+                    await asyncio.sleep(0.4)
+            asyncio.create_task(_run_script(script))
+        return {"status": "started", "avatar": system_stats.get("avatar_id")}
+    except Exception as e:
+        logger.error(f"start 失败：{e}", exc_info=True)
+        return {"status": "error", "error": str(e)}
+
+async def stop() -> bool:
+    """安全停止：取消后台任务并播放下线动画"""
+    global current_task, required_resource
+    try:
+        gui_notify("虚拟形象下线中…", animation="fade_out")
+        if current_task and not current_task.done():
+            current_task.cancel()
+            try:
+                await asyncio.wait_for(current_task, timeout=2.0)
+            except Exception:
+                pass
+        required_resource = None
+        await asyncio.sleep(0.15)
+        logger.info("虚拟形象已安全停止")
+        return True
+    except Exception as e:
+        logger.error(f"stop 出错：{e}", exc_info=True)
+        return False
+
+async def self_check() -> Dict[str, Any]:
+    """健康检查：资源/渲染/事件映射/动画数"""
+    status = "ok"
+    checks = {
+        "资源就绪": required_resource is not None,
+        "渲染回调": "render_action" in renderer_callbacks,
+        "事件映射": len(EVENT_ACTION_MAP) > 0,
+        "可用动画": len(VALID_ANIMATIONS) > 0
+    }
+    if not all(checks.values()):
+        status = "warning" if checks["资源就绪"] else "error"
+    metrics = {
+        "uptime": (time.time() - system_stats.get("start_time", time.time())),
+        "event_count": system_stats.get("event_count", 0),
+        "avatar_id": system_stats.get("avatar_id", DEFAULT_AVATAR_ID),
+        "animations": len(VALID_ANIMATIONS)
+    }
+    return {"status": status, "checks": checks, "metrics": metrics, "fedora_optimized": IS_FEDORA}
+
+# ====== 动作注册（给调度器/别名系统）======
+def register_actions(dispatcher, context=None):
+    """
+    - virtual_avatar.say            text -> 说话 + 表情
+    - virtual_avatar.play           action -> 播放动画
+    - virtual_avatar.pose           name -> 切换姿态
+    - virtual_avatar.emote          name -> 表情
+    - virtual_avatar.self_check     -> 健康检查
+    """
+    def _say(params=None, **kw):
+        text = (params or {}).get("text", "")
+        asyncio.create_task(on_event("avatar.say", {"text": text}))
+        return {"status": "queued", "text": text}
+
+    def _play(params=None, **kw):
+        act = (params or {}).get("action", "")
+        ok = play_animation(act, meta={"source": "action_api"})
+        return {"status": "success" if ok else "fail", "action": act}
+
+    def _pose(params=None, **kw):
+        name = (params or {}).get("name", "pose_idle")
+        ok = play_animation(name, meta={"source": "pose_api"})
+        return {"status": "success" if ok else "fail", "pose": name}
+
+    def _emote(params=None, **kw):
+        name = (params or {}).get("name", "emote_warning")
+        ok = play_animation(name, meta={"source": "emote_api"})
+        return {"status": "success" if ok else "fail", "emote": name}
+
+    def _health(params=None, **kw):
+        return asyncio.get_event_loop().run_until_complete(self_check())
+
+    dispatcher.register_action("virtual_avatar.say", _say, module_name="modules.virtual_avatar")
+    dispatcher.register_action("virtual_avatar.play", _play, module_name="modules.virtual_avatar")
+    dispatcher.register_action("virtual_avatar.pose", _pose, module_name="modules.virtual_avatar")
+    dispatcher.register_action("virtual_avatar.emote", _emote, module_name="modules.virtual_avatar")
+    dispatcher.register_action("virtual_avatar.self_check", _health, module_name="modules.virtual_avatar")
+    logger.info("virtual_avatar 动作注册完成")
+
+# ====== 快速自测 ======
+if __name__ == "__main__":
+    async def _demo():
+        await init({})
+        await start({"startup_script": ["pose_idle", "wave", "talk", "success_burst"]})
+        await on_event("avatar.say", {"text": "你好，我是聚核助手的虚拟形象～"})
+        await asyncio.sleep(1.2)
+        await on_event("performance_alert", {"alert_type": "high_cpu"})
+        await asyncio.sleep(0.6)
+        print(await self_check())
+        await stop()
+
+    asyncio.run(_demo())

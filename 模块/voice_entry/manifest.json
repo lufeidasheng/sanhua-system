@@ -1,0 +1,22 @@
+{
+    "author": "Auto-Gen",
+    "config": {
+        "max_record_duration": 10,
+        "wake_word": "三花聚顶",
+        "whisper_model": "tiny"
+    },
+    "created_at": "2025-07-12",
+    "dependencies": [],
+    "description": "语音入口模块 - 唤醒词监听 → 语音转写 → 意图解析",
+    "enabled": true,
+    "entry": "voice_entry.py",
+    "entry_point": "voice_entry.py:main",
+    "entry_points": [
+        "voice"
+    ],
+    "id": "voice_entry",
+    "is_entry": true,
+    "name": "voice_entry",
+    "version": "1.0.0",
+    "visibility": "interface"
+}

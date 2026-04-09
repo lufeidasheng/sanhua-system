@@ -1,0 +1,17 @@
+# default_config.yaml
+
+system:
+  reboot_script: "/home/lufei/restart.sh"
+  video_path: "~/Videos"
+  bluetooth:
+    enabled: true
+
+network:
+  auto_restart: true
+
+music:
+  local_music_path: "~/Music"
+
+logging:
+  level: INFO
+  file: "/tmp/aicore.log"

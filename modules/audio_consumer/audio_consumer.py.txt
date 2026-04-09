@@ -1,0 +1,204 @@
+"""
+三花聚顶 · audio_consumer 标准功能模块
+作者: 三花聚顶开发团队
+描述: 基于多进程架构的音频数据消费模块，支持流式音频存储、自动清理、队列监控与标准动作接口。
+"""
+
+import os
+import time
+import logging
+import multiprocessing as mp
+import wave
+from dataclasses import dataclass
+from typing import List, Optional, Any
+
+from core.core2_0.sanhuatongyu.module.base import BaseModule
+from core.core2_0.sanhuatongyu.logger import get_logger
+
+logger = get_logger("audio_consumer")
+
+# ==== 1. 配置结构 ====
+@dataclass
+class AudioConfig:
+    rate: int = 16000
+    chunk: int = 1024
+    channels: int = 1
+    save_path: str = "recordings"
+    max_seconds_per_file: int = 3
+    max_files: int = 100
+    file_prefix: str = "audio"
+    queue_warning_threshold: int = 80
+
+# ==== 2. 消费进程核心 ====
+class AudioConsumerCore:
+    def __init__(self, audio_queue: mp.Queue, stop_event: mp.Event, config: AudioConfig):
+        self.audio_queue = audio_queue
+        self.stop_event = stop_event
+        self.config = config
+        self.current_frames: List[bytes] = []
+        self.file_counter = 0
+        self.total_duration = 0.0
+        self.last_file_path: Optional[str] = None
+
+        os.makedirs(self.config.save_path, exist_ok=True)
+        logger.info(f"音频保存目录: {os.path.abspath(self.config.save_path)}")
+
+    def _calculate_audio_duration(self, frames: List[bytes]) -> float:
+        total_bytes = sum(len(frame) for frame in frames)
+        bytes_per_second = self.config.rate * self.config.channels * 2
+        return total_bytes / bytes_per_second
+
+    def _save_to_file(self, frames: List[bytes]) -> Optional[str]:
+        if not frames:
+            logger.warning("空帧，未保存")
+            return None
+        duration = self._calculate_audio_duration(frames)
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        filename = os.path.join(
+            self.config.save_path,
+            f"{self.config.file_prefix}_{timestamp}_{self.file_counter:04d}.wav"
+        )
+        self.file_counter += 1
+        try:
+            with wave.open(filename, 'wb') as wf:
+                wf.setnchannels(self.config.channels)
+                wf.setsampwidth(2)
+                wf.setframerate(self.config.rate)
+                wf.writeframes(b''.join(frames))
+            logger.info(f"保存音频: {os.path.basename(filename)} ({duration:.2f}s)")
+            self.last_file_path = filename
+            return filename
+        except Exception as e:
+            logger.error(f"保存音频失败: {e}")
+            return None
+
+    def _clean_old_files(self):
+        try:
+            files = [f for f in os.listdir(self.config.save_path)
+                     if f.startswith(self.config.file_prefix) and f.endswith(".wav")]
+            if len(files) > self.config.max_files:
+                files.sort(key=lambda f: os.path.getctime(os.path.join(self.config.save_path, f)))
+                files_to_delete = files[:len(files) - self.config.max_files]
+                for f in files_to_delete:
+                    try:
+                        os.remove(os.path.join(self.config.save_path, f))
+                        logger.info(f"清理旧文件: {f}")
+                    except Exception as e:
+                        logger.error(f"删除文件{f}失败: {e}")
+        except Exception as e:
+            logger.error(f"清理文件失败: {e}")
+
+    def run(self):
+        logger.info("音频消费者启动")
+        while not self.stop_event.is_set():
+            try:
+                data = self.audio_queue.get(timeout=0.5)
+                self.current_frames.append(data)
+                if self._calculate_audio_duration(self.current_frames) >= self.config.max_seconds_per_file:
+                    self._save_to_file(self.current_frames)
+                    self.current_frames = []
+                    self._clean_old_files()
+            except Exception:
+                if self.current_frames:
+                    self._save_to_file(self.current_frames)
+                    self.current_frames = []
+
+# ==== 3. 多进程管理器 ====
+class AudioConsumerManager:
+    def __init__(self, config: Optional[AudioConfig] = None):
+        self.config = config or AudioConfig()
+        self.audio_queue = mp.Queue(maxsize=50)
+        self.stop_event = mp.Event()
+        self.process: Optional[mp.Process] = None
+        self.last_file_path: Optional[str] = None
+
+    def start(self):
+        if self.process and self.process.is_alive():
+            logger.warning("音频进程已在运行")
+            return {"status": "started", "message": "音频录制进程已启动"}
+        self.stop_event.clear()
+        self.process = mp.Process(
+            target=self._consumer_process,
+            args=(self.audio_queue, self.stop_event, self.config, self),
+            name="AudioConsumerProcess"
+        )
+        self.process.start()
+        logger.info("音频录制进程已启动")
+        return {"status": "started", "message": "音频录制进程已启动"}
+
+    def stop(self):
+        if self.process and self.process.is_alive():
+            self.stop_event.set()
+            self.process.join(timeout=3)
+            logger.info("音频录制进程已停止")
+            return {"status": "stopped", "message": "音频录制进程已停止"}
+        else:
+            return {"status": "not_running", "message": "录音进程未运行"}
+
+    def get_last_file(self):
+        # 跨进程赋值一般无效，这里返回None或可采用更复杂IPC
+        return {"status": "success", "last_file": self.last_file_path or "无录音文件"}
+
+    @staticmethod
+    def _consumer_process(audio_queue, stop_event, config, manager_obj):
+        consumer = AudioConsumerCore(audio_queue, stop_event, config)
+        consumer.run()
+        # 跨进程赋值无效，仅为结构留存
+        # manager_obj.last_file_path = consumer.last_file_path
+
+# ==== 4. 标准模块类 ====
+class AudioConsumerModule(BaseModule):
+    """
+    三花聚顶 · 音频消费者标准模块
+    """
+    def preload(self):
+        logger.info("audio_consumer 模块预加载完成")
+
+    def setup(self):
+        if not hasattr(self.context, "audio_consumer_manager"):
+            self.context.audio_consumer_manager = AudioConsumerManager()
+        # 标准动作注册（parameters建议写全，兼容自动文档/权限管理）
+        self.context.register_action(
+            "audio_consumer.start", self.start_recording,
+            description="启动音频录制", parameters={}, permission="user", module=self.meta.name
+        )
+        self.context.register_action(
+            "audio_consumer.stop", self.stop_recording,
+            description="停止音频录制", parameters={}, permission="user", module=self.meta.name
+        )
+        self.context.register_action(
+            "audio_consumer.get_last_file", self.get_last_file,
+            description="获取最后录音文件", parameters={}, permission="user", module=self.meta.name
+        )
+        logger.info("audio_consumer 模块setup完成，动作注册完毕")
+
+    def start(self):
+        logger.info("audio_consumer 模块启动")
+
+    def stop(self):
+        logger.info("audio_consumer 模块停止")
+        self.context.audio_consumer_manager.stop()
+
+    def handle_event(self, event_type: str, event_data: dict):
+        pass
+
+    # === 标准动作 ===
+    def start_recording(self, context=None, params=None, **kwargs):
+        return self.context.audio_consumer_manager.start()
+
+    def stop_recording(self, context=None, params=None, **kwargs):
+        return self.context.audio_consumer_manager.stop()
+
+    def get_last_file(self, context=None, params=None, **kwargs):
+        return self.context.audio_consumer_manager.get_last_file()
+
+# ==== 5. 标准模块统一注册口 ====
+def register_actions(dispatcher, context=None):
+    mod = AudioConsumerModule(meta=dispatcher.get_module_meta("audio_consumer"), context=context)
+    dispatcher.register_action("audio_consumer.start", mod.start_recording, module="audio_consumer")
+    dispatcher.register_action("audio_consumer.stop", mod.stop_recording, module="audio_consumer")
+    dispatcher.register_action("audio_consumer.get_last_file", mod.get_last_file, module="audio_consumer")
+    logger.info("audio_consumer 动作注册完成")
+
+# ==== 6. 反射标准模块主类供系统自动发现 ====
+MODULE_CLASS = AudioConsumerModule

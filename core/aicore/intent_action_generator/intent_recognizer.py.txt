@@ -1,0 +1,230 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+import re
+import os
+import logging
+from typing import Dict, Any, Optional, List, Tuple
+
+logger = logging.getLogger("IntentRecognizer")
+
+class IntentRecognizer:
+    """
+    三花聚顶 · 基础意图识别器（企业级 · 规则驱动 + 智能参数提取）
+    - 明确优先级：视频 > 音乐 > 其他
+    - 视频命令固定形态：“播放视频 <名字|路径>”，兼容 / 与 \
+    - 自动补扩展名、归一化路径，兼容 file_path / filepath
+    """
+
+    def __init__(self):
+        self.patterns: List[Tuple[re.Pattern, str, Dict[str, Any], str]] = []
+        self._init_builtin_patterns()
+
+    # ========= 辅助工具 =========
+
+    @staticmethod
+    def _home_videos_dir() -> str:
+        # 统一走 ~/视频；存在性由动作层处理
+        return os.path.expanduser("~/视频")
+
+    @staticmethod
+    def _normalize_video_target(raw: str, default_ext: str = ".mp4") -> str:
+        """
+        将用户自然语言里的视频目标统一成绝对路径：
+        - 支持绝对路径/文件名/带斜杠
+        - 去空白与引号
+        - 防注入：相对路径仅保留文件名
+        """
+        raw = (raw or "").strip().strip("“”\"'")
+        if raw.startswith("/"):  # 绝对路径直接返回
+            return raw
+
+        name = os.path.basename(raw)
+        base, ext = os.path.splitext(name)
+        if not ext:
+            name = f"{name}{default_ext}"
+
+        return os.path.join(IntentRecognizer._home_videos_dir(), name)
+
+    def _compile(self, pattern: str) -> re.Pattern:
+        return re.compile(pattern, re.IGNORECASE)
+
+    # ========= 规则初始化 =========
+
+    def _init_builtin_patterns(self):
+        """
+        🌱 初始化内建意图规则（按优先级排序）
+        元组结构：(compiled_regex, intent, opts, action_name)
+        """
+        self.patterns = [
+            # ==== 视频播放（最高优先级）====
+            # 严格入口：必须出现“播放视频”，后跟名字/路径；分隔符支持 /、\、空格、冒号（全/半角）
+            (
+                self._compile(r"^\s*播放视频[\/\\：:\s]+(.+?)\s*$"),
+                "play_video_file",
+                {"extract_video_name": True},
+                "play_video_file",
+            ),
+            # 宽松入口：带扩展名（.mp4/.mkv/.avi/.mov）
+            (
+                self._compile(r"^\s*播放(?:视频)?[\/\\：:\s]+(.+?\.(mp4|mkv|avi|mov))\s*$"),
+                "play_video_file",
+                {"extract_path_with_ext": True},
+                "play_video_file",
+            ),
+
+            # ==== 音乐（次优先级）====
+            (self._compile(r"^\s*播放(音乐|歌曲)\s*$"), "play_music", {}, "play_music"),
+            (self._compile(r"^\s*下一(首|曲)\s*$"), "next_song", {}, "next_song"),
+            (self._compile(r"^\s*上一(首|曲)\s*$"), "previous_song", {}, "previous_song"),
+            (self._compile(r"^\s*暂停(音乐)?\s*$"), "pause_music", {}, "pause_music"),
+            (self._compile(r"^\s*停止(音乐)?\s*$"), "stop_music", {}, "stop_music"),
+            (self._compile(r"^\s*(开启|打开)?单曲循环\s*$"), "loop_one_on", {}, "loop_one_on"),
+            (self._compile(r"^\s*(关闭)?单曲循环\s*$"), "loop_one_off", {}, "loop_one_off"),
+
+            # ==== 蓝牙音频 ====
+            (self._compile(r"^\s*打开(蓝牙)\s*$"), "enable_bluetooth", {}, "enable_bluetooth"),
+            (self._compile(r"^\s*关闭(蓝牙)\s*$"), "disable_bluetooth", {}, "disable_bluetooth"),
+            (self._compile(r"^\s*连接(耳机|蓝牙耳机)\s*$"), "connect_headset", {}, "connect_headset"),
+
+            # ==== 系统控制 ====
+            (self._compile(r"^\s*(关机|关闭电脑|关闭助手|退出)\s*$"), "shutdown", {}, "shutdown"),
+            (self._compile(r"^\s*(重启|重新启动)(系统)?\s*$"), "reboot", {}, "reboot"),
+            (self._compile(r"^\s*锁屏\s*$"), "lock_screen", {}, "lock_screen"),
+            (self._compile(r"^\s*(睡眠|待机)\s*$"), "suspend", {}, "suspend"),
+            (self._compile(r"^\s*注销\s*$"), "logout", {}, "logout"),
+            (self._compile(r"^\s*关闭显示器\s*$"), "turn_off_display", {}, "turn_off_display"),
+
+            # ==== 实用工具 ====
+            (self._compile(r"^\s*(截图|截屏)\s*$"), "screenshot", {}, "screenshot"),
+            (self._compile(r"^\s*打开(浏览器)\s*$"), "open_browser", {}, "open_browser"),
+            (
+                self._compile(r"^\s*打开网址[：:\s]*(https?://[^\s]+)\s*$"),
+                "open_url",
+                {"extract_url": True},
+                "open_url",
+            ),
+            (self._compile(r"^\s*(当前)?时间\s*$"), "show_time", {}, "show_time"),
+            (self._compile(r"^\s*(当前)?日期\s*$"), "show_date", {}, "show_date"),
+            (self._compile(r"^\s*(检测|检查)网络\s*$"), "check_network", {}, "check_network"),
+            (
+                self._compile(r"^\s*设置提醒[：:\s]*(\d+)\s*$"),
+                "set_reminder",
+                {"extract_minutes": True},
+                "set_reminder",
+            ),
+
+            # ==== 关闭应用 ====
+            (
+                self._compile(r"^\s*关闭(浏览器|应用|[a-zA-Z0-9_\u4e00-\u9fa5\-]+)\s*$"),
+                "close_app",
+                {"extract_app": True},
+                "close_app",
+            ),
+
+            # ==== 记忆与查询 ====
+            (
+                self._compile(r"^\s*记忆[:：]?(.*)$"),
+                "remember",
+                {"extract_value": True},
+                "remember",
+            ),
+            (
+                self._compile(r"^\s*查询[:：]?(.*)$"),
+                "search",
+                {"extract_value": True},
+                "search_memory",
+            ),
+        ]
+
+    # ========= 识别主流程 =========
+
+    def recognize(self, query: str) -> Optional[Dict[str, Any]]:
+        """
+        🔍 规则解析用户意图，返回结构化对象：
+        {
+            "intent": "xxx",
+            "params": {...},
+            "action_name": "xxx"
+        }
+        """
+        q = (query or "").strip()
+        # 标准化分隔符（回归兼容）：\、全角斜杠／、全角冒号： → /
+        q = q.replace("\\", "/").replace("／", "/").replace("：", ":")
+        if not q:
+            logger.debug("❓ 空查询，跳过识别")
+            return None
+
+        try:
+            for pattern, intent, opts, action_name in self.patterns:
+                m = pattern.search(q)
+                if not m:
+                    continue
+
+                params: Dict[str, Any] = {}
+
+                # ======= 视频参数提取 =======
+                if opts.get("extract_path_with_ext") and m.lastindex:
+                    raw = m.group(1).strip()
+                    full = self._normalize_video_target(raw)  # 已含扩展名
+                    params["file_path"] = full
+                    params["filepath"] = full  # 兼容旧动作签名
+
+                elif opts.get("extract_video_name") and m.lastindex:
+                    raw = m.group(1).strip()
+                    full = self._normalize_video_target(raw, default_ext=".mp4")
+                    params["file_path"] = full
+                    params["filepath"] = full
+
+                # ======= URL 参数 =======
+                elif opts.get("extract_url") and m.lastindex:
+                    params["url"] = m.group(m.lastindex).strip()
+
+                # ======= 提醒分钟 =======
+                elif opts.get("extract_minutes") and m.lastindex:
+                    params["minutes"] = int(m.group(m.lastindex))
+
+                # ======= 通用 value =======
+                elif opts.get("extract_value") and m.lastindex is not None:
+                    params["value"] = m.group(m.lastindex).strip()
+
+                # ======= 关闭应用 =======
+                elif opts.get("extract_app") and m.lastindex:
+                    app = m.group(m.lastindex).strip()
+                    params["app_name"] = app
+
+                logger.info(f"🎯 命中规则: {intent} / 动作: {action_name} / 参数: {params} / 原始: {q}")
+                return {
+                    "intent": intent,
+                    "params": params,
+                    "action_name": action_name
+                }
+
+        except Exception as e:
+            logger.exception(f"❌ 意图识别异常: {e}")
+
+        logger.debug(f"❓ 未匹配任何意图: {q}")
+        return None
+
+
+# ==== 本地快速测试 ====
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+    ir = IntentRecognizer()
+    tests = [
+        "播放视频 后厨",                 # 自动补 .mp4 -> ~/视频/后厨.mp4
+        "播放视频/后厨.mp4",             # 带斜杠路径
+        "播放视频 \\后厨",               # 反斜杠 -> 归一化
+        "播放 /home/lufei/视频/后厨.mp4", # 绝对路径（宽松入口不匹配，这句用于动作直呼场景）
+        "播放音乐",                      # 音乐
+        "下一首",                        # 音乐控制
+        "打开网址:https://www.bing.com",
+        "设置提醒:5",
+        "关闭chrome",
+        "记忆: 今天很开心",
+        "查询: 小王",
+        "未知命令"
+    ]
+    for t in tests:
+        print("🧪 输入:", t)
+        print("→ 识别结果:", ir.recognize(t))

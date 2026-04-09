@@ -1,0 +1,11 @@
+entry/gui_entry
+entry/cli_entry
+core/core2_0
+core/memory_engine
+core/prompt_engine
+modules/code_reader
+modules/code_executor
+modules/code_inserter
+modules/music_module
+modules/state_describe
+...

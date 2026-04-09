@@ -1,0 +1,73 @@
+{
+  "name": "desktop_notify",
+  "version": "1.0.0",
+  "title": "三花聚顶 · GNOME 桌面通知模块",
+  "author": "三花聚顶开发团队",
+  "description": "把系统动作/事件转发到 GNOME 桌面通知中心（libnotify），在无图形环境时自动降级为控制台输出。",
+  "license": "MIT",
+  "entry": "module.py",
+  "entry_class": "modules.desktop_notify.module.DesktopNotifyModule",
+  "enabled": true,
+  "entry_points": [
+    "core",
+    "gui"
+  ],
+  "icon": "🔔",
+  "health_check": true,
+  "hot_pluggable": true,
+  "singleton": true,
+  "status": "stable",
+  "categories": [
+    "system",
+    "ui_notification",
+    "desktop_integration"
+  ],
+  "tags": [
+    "gnome",
+    "notify",
+    "libnotify",
+    "system-notification"
+  ],
+  "dependencies": [
+    "gi"
+  ],
+  "actions": [
+    {
+      "name": "desktop_notify",
+      "description": "发送桌面通知",
+      "permission": "user",
+      "aliases": [
+        "系统通知",
+        "发送通知",
+        "桌面通知"
+      ]
+    },
+    {
+      "name": "notify.success",
+      "description": "发送成功通知",
+      "permission": "user",
+      "aliases": [
+        "成功提示"
+      ]
+    },
+    {
+      "name": "notify.warning",
+      "description": "发送警告通知",
+      "permission": "user",
+      "aliases": [
+        "警告提示"
+      ]
+    },
+    {
+      "name": "notify.error",
+      "description": "发送错误通知",
+      "permission": "user",
+      "aliases": [
+        "错误提示"
+      ]
+    }
+  ],
+  "config_schema": {},
+  "market_compatible": true,
+  "is_entry": true
+}

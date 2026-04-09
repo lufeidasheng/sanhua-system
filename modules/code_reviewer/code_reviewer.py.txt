@@ -1,0 +1,793 @@
+# modules/code_reviewer.py
+
+import ast
+import logging
+import os
+import re
+import tokenize
+from io import StringIO
+from typing import List, Dict, Any, Tuple, Optional
+import json
+import hashlib
+import datetime
+import importlib.util
+import pkg_resources
+import subprocess
+import tempfile
+from dataclasses import dataclass
+import bandit
+from bandit.core import manager as bandit_manager
+import radon
+from radon.complexity import cc_visit
+import flake8.api
+import autopep8
+
+# 配置日志
+logger = logging.getLogger("code_reviewer")
+logger.setLevel(logging.INFO)
+
+# 创建格式化器
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
+# 文件日志 - 修复日志路径问题
+log_dir = os.path.join(os.path.dirname(__file__), "..", "..", "logs")
+os.makedirs(log_dir, exist_ok=True)
+log_file = os.path.join(log_dir, "code_reviewer.log")
+
+file_handler = logging.FileHandler(log_file)
+file_handler.setFormatter(formatter)
+logger.addHandler(file_handler)
+
+# 控制台日志
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(formatter)
+logger.addHandler(console_handler)
+
+# 安全审计配置
+DANGEROUS_FUNCTIONS = [
+    'os.system', 'subprocess.Popen', 'eval', 'exec', 'pickle.loads',
+    'marshal.loads', 'yaml.load', 'shlex.split', 'pty.spawn',
+    'glob.glob', 'fnmatch.filter', 'tempfile.mktemp'
+]
+
+SECURITY_PATTERNS = [
+    r'\bpassword\s*=',  # 硬编码密码
+    r'\bapi_key\s*=',   # API密钥
+    r'\bsecret\s*=',    # 密钥
+    r'https?://[^\s]+', # 硬编码URL
+    r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'  # 电子邮件
+]
+
+# Fedora安全策略
+FEDORA_SECURITY_POLICY = {
+    "forbidden_modules": [
+        "ctypes", "fcntl", "mmap", "resource", "select", "signal", 
+        "socket", "syslog", "termios", "pty", "pwd", "grp", "spwd"
+    ],
+    "allowed_imports": [
+        "math", "json", "datetime", "collections", "re", "random", 
+        "typing", "logging", "os.path", "sys", "itertools", "functools"
+    ]
+}
+
+@dataclass
+class ReviewResult:
+    conflicts: Dict[str, List[str]]
+    security_issues: List[Dict[str, Any]]
+    style_violations: List[Dict[str, Any]]
+    complexity: Dict[str, Any]
+    dependencies: Dict[str, Any]
+    fedora_compliance: Dict[str, Any]
+    summary: str
+    score: int
+
+class CodeReviewer:
+    def __init__(self):
+        logger.info("代码审查器初始化完成")
+        self.language_support = {
+            'py': self._analyze_python,
+            'js': self._analyze_javascript,
+            'java': self._analyze_java,
+            'c': self._analyze_c,
+            'cpp': self._analyze_cpp,
+            'go': self._analyze_go
+        }
+        self.security_engine = SecurityEngine()
+        self.style_engine = StyleEngine()
+
+    def _get_language_analyzer(self, file_ext: str) -> callable:
+        """获取语言特定的分析器"""
+        return self.language_support.get(file_ext, self._analyze_generic)
+
+    def review_code(self, file_path: str, insert_code: Optional[str] = None) -> Dict[str, Any]:
+        """执行全面的代码审查"""
+        # 获取文件扩展名
+        file_ext = os.path.splitext(file_path)[1][1:]  # 去掉点
+        
+        # 读取原始代码
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                original_code = f.read()
+        except Exception as e:
+            logger.error(f"文件读取失败: {file_path} - {e}")
+            return {
+                "status": "error",
+                "message": f"无法读取文件: {str(e)}"
+            }
+        
+        # 如果有插入代码，合并
+        if insert_code:
+            modified_code = original_code + "\n\n# === 插入代码 ===\n" + insert_code
+        else:
+            modified_code = original_code
+        
+        # 获取分析函数
+        analyzer = self._get_language_analyzer(file_ext)
+        
+        # 执行分析
+        try:
+            result = analyzer(file_path, original_code, modified_code, insert_code)
+            return {
+                "status": "success",
+                "file_path": file_path,
+                "review": result.__dict__
+            }
+        except Exception as e:
+            logger.exception(f"代码审查失败: {e}")
+            return {
+                "status": "error",
+                "message": f"分析过程中出错: {str(e)}"
+            }
+
+    def _analyze_python(self, file_path: str, original_code: str, modified_code: str, insert_code: Optional[str]) -> ReviewResult:
+        """Python代码分析"""
+        # 名称冲突检测
+        conflicts = self._detect_name_conflicts(original_code, insert_code) if insert_code else {}
+        
+        # 安全审计
+        security_issues = self.security_engine.audit_python(modified_code, file_path)
+        
+        # 风格检查
+        style_violations = self.style_engine.check_python_style(modified_code, file_path)
+        
+        # 复杂度分析
+        complexity = self._calculate_complexity(modified_code)
+        
+        # 依赖分析
+        dependencies = self._analyze_dependencies(modified_code, file_path)
+        
+        # Fedora合规性检查
+        fedora_compliance = self._check_fedora_compliance(modified_code)
+        
+        # 生成摘要和评分
+        summary, score = self._generate_summary(conflicts, security_issues, style_violations, complexity)
+        
+        return ReviewResult(
+            conflicts=conflicts,
+            security_issues=security_issues,
+            style_violations=style_violations,
+            complexity=complexity,
+            dependencies=dependencies,
+            fedora_compliance=fedora_compliance,
+            summary=summary,
+            score=score
+        )
+
+    def _analyze_javascript(self, file_path: str, original_code: str, modified_code: str, insert_code: Optional[str]) -> ReviewResult:
+        """JavaScript代码分析 (简化版)"""
+        # 这里只实现基本功能，实际项目需要扩展
+        return ReviewResult(
+            conflicts={},
+            security_issues=self.security_engine.audit_javascript(modified_code),
+            style_violations=[],
+            complexity={},
+            dependencies={},
+            fedora_compliance={},
+            summary="JavaScript审查完成 (基础)",
+            score=80
+        )
+
+    def _analyze_java(self, file_path: str, original_code: str, modified_code: str, insert_code: Optional[str]) -> ReviewResult:
+        """Java代码分析 (简化版)"""
+        return ReviewResult(
+            conflicts={},
+            security_issues=[],
+            style_violations=[],
+            complexity={},
+            dependencies={},
+            fedora_compliance={},
+            summary="Java审查完成 (基础)",
+            score=85
+        )
+
+    def _analyze_c(self, file_path: str, original_code: str, modified_code: str, insert_code: Optional[str]) -> ReviewResult:
+        """C代码分析 (简化版)"""
+        return ReviewResult(
+            conflicts={},
+            security_issues=[],
+            style_violations=[],
+            complexity={},
+            dependencies={},
+            fedora_compliance={},
+            summary="C审查完成 (基础)",
+            score=85
+        )
+
+    def _analyze_cpp(self, file_path: str, original_code: str, modified_code: str, insert_code: Optional[str]) -> ReviewResult:
+        """C++代码分析 (简化版)"""
+        return ReviewResult(
+            conflicts={},
+            security_issues=[],
+            style_violations=[],
+            complexity={},
+            dependencies={},
+            fedora_compliance={},
+            summary="C++审查完成 (基础)",
+            score=85
+        )
+
+    def _analyze_go(self, file_path: str, original_code: str, modified_code: str, insert_code: Optional[str]) -> ReviewResult:
+        """Go代码分析 (简化版)"""
+        return ReviewResult(
+            conflicts={},
+            security_issues=[],
+            style_violations=[],
+            complexity={},
+            dependencies={},
+            fedora_compliance={},
+            summary="Go审查完成 (基础)",
+            score=85
+        )
+
+    def _analyze_generic(self, file_path: str, original_code: str, modified_code: str, insert_code: Optional[str]) -> ReviewResult:
+        """通用代码分析"""
+        return ReviewResult(
+            conflicts={},
+            security_issues=self.security_engine.audit_generic(modified_code),
+            style_violations=[],
+            complexity={},
+            dependencies={},
+            fedora_compliance={},
+            summary="通用代码审查完成",
+            score=70
+        )
+
+    def _detect_name_conflicts(self, original_code: str, insert_code: str) -> Dict[str, List[str]]:
+        """检测名称冲突"""
+        try:
+            # 解析原始代码
+            tree_original = ast.parse(original_code)
+            original_names = self._extract_names_from_ast(tree_original)
+            
+            # 解析插入代码
+            tree_insert = ast.parse(insert_code)
+            insert_names = self._extract_names_from_ast(tree_insert)
+            
+            # 检测冲突
+            conflicts = {
+                "functions": [],
+                "classes": [],
+                "variables": []
+            }
+            
+            for key in ["functions", "classes", "variables"]:
+                for name in insert_names[key]:
+                    if name in original_names[key]:
+                        conflicts[key].append(name)
+            
+            return conflicts
+        except SyntaxError as e:
+            logger.error(f"名称冲突检测失败: {e}")
+            return {
+                "functions": [],
+                "classes": [],
+                "variables": []
+            }
+
+    def _extract_names_from_ast(self, tree: ast.AST) -> Dict[str, List[str]]:
+        """从AST中提取名称"""
+        names = {
+            "functions": [],
+            "classes": [],
+            "variables": [],
+            "imports": []
+        }
+        
+        try:
+            for node in ast.walk(tree):
+                if isinstance(node, ast.FunctionDef):
+                    names["functions"].append(node.name)
+                elif isinstance(node, ast.ClassDef):
+                    names["classes"].append(node.name)
+                elif isinstance(node, ast.Assign):
+                    for target in node.targets:
+                        if isinstance(target, ast.Name):
+                            names["variables"].append(target.id)
+                        elif isinstance(target, ast.Tuple):
+                            for elt in target.elts:
+                                if isinstance(elt, ast.Name):
+                                    names["variables"].append(elt.id)
+                elif isinstance(node, (ast.Import, ast.ImportFrom)):
+                    for alias in node.names:
+                        names["imports"].append(alias.name)
+        except Exception as e:
+            logger.error(f"AST遍历失败: {e}")
+        
+        return names
+
+    def _calculate_complexity(self, code: str) -> Dict[str, Any]:
+        """计算代码复杂度"""
+        try:
+            blocks = cc_visit(code)
+            # 修复：直接比较字符串 'function'
+            functions = [block for block in blocks if block.type == 'function']
+            
+            if functions:
+                total_complexity = sum(f.complexity for f in functions)
+                average_complexity = total_complexity / len(functions)
+                max_complexity = max(f.complexity for f in functions)
+                high_complexity_functions = [
+                    {"name": f.name, "complexity": f.complexity, "lineno": f.lineno}
+                    for f in functions if f.complexity > 10
+                ]
+                function_count = len(functions)
+            else:
+                total_complexity = 0
+                average_complexity = 0
+                max_complexity = 0
+                high_complexity_functions = []
+                function_count = 0
+            
+            return {
+                "cyclomatic_complexity": total_complexity,
+                "average_complexity": average_complexity,
+                "function_count": function_count,
+                "max_complexity": max_complexity,
+                "high_complexity_functions": high_complexity_functions
+            }
+        except Exception as e:
+            logger.error(f"复杂度计算失败: {e}")
+            return {
+                "error": str(e)
+            }
+
+    def _analyze_dependencies(self, code: str, file_path: str) -> Dict[str, Any]:
+        """分析依赖关系"""
+        try:
+            # 提取导入语句
+            imports = []
+            tree = ast.parse(code)
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    for alias in node.names:
+                        imports.append(alias.name)
+                elif isinstance(node, ast.ImportFrom):
+                    module = node.module
+                    # 修复：处理相对导入 (module 可能为 None)
+                    if module is not None:
+                        for alias in node.names:
+                            imports.append(f"{module}.{alias.name}")
+            
+            # 检查缺失的依赖
+            missing = []
+            for imp in set(imports):
+                try:
+                    importlib.util.find_spec(imp.split('.')[0])
+                except (ImportError, ModuleNotFoundError):
+                    missing.append(imp)
+            
+            return {
+                "imports": imports,
+                "missing_dependencies": missing,
+                "dependency_count": len(imports)
+            }
+        except Exception as e:
+            logger.error(f"依赖分析失败: {e}")
+            return {
+                "error": str(e)
+            }
+
+    def _check_fedora_compliance(self, code: str) -> Dict[str, Any]:
+        """检查Fedora合规性"""
+        violations = []
+        warnings = []
+        
+        try:
+            tree = ast.parse(code)
+            
+            # 检查禁止的模块
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    for alias in node.names:
+                        if alias.name in FEDORA_SECURITY_POLICY["forbidden_modules"]:
+                            violations.append({
+                                "type": "forbidden_module",
+                                "module": alias.name,
+                                "severity": "high",
+                                "description": f"禁止使用模块: {alias.name}",
+                                "line": node.lineno
+                            })
+                elif isinstance(node, ast.ImportFrom) and node.module:
+                    if node.module in FEDORA_SECURITY_POLICY["forbidden_modules"]:
+                        violations.append({
+                            "type": "forbidden_module",
+                            "module": node.module,
+                            "severity": "high",
+                            "description": f"禁止使用模块: {node.module}",
+                            "line": node.lineno
+                        })
+            
+            # 检查未授权的导入
+            allowed_imports = set(FEDORA_SECURITY_POLICY["allowed_imports"])
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    for alias in node.names:
+                        if alias.name not in allowed_imports:
+                            warnings.append({
+                                "type": "unapproved_import",
+                                "module": alias.name,
+                                "severity": "medium",
+                                "description": f"未授权导入: {alias.name}",
+                                "line": node.lineno
+                            })
+                elif isinstance(node, ast.ImportFrom) and node.module:
+                    if node.module not in allowed_imports:
+                        warnings.append({
+                            "type": "unapproved_import",
+                            "module": node.module,
+                            "severity": "medium",
+                            "description": f"未授权导入: {node.module}",
+                            "line": node.lineno
+                        })
+        
+        except SyntaxError as e:
+            logger.error(f"Fedora合规检查失败: {e}")
+        
+        return {
+            "violations": violations,
+            "warnings": warnings,
+            "compliance_score": 100 - len(violations) * 10 - len(warnings) * 5
+        }
+
+    def _generate_summary(self, conflicts, security_issues, style_violations, complexity) -> Tuple[str, int]:
+        """生成审查摘要和评分"""
+        # 初始分数
+        score = 100
+        
+        # 冲突扣分
+        conflict_count = sum(len(v) for v in conflicts.values())
+        score -= conflict_count * 5
+        
+        # 安全问题扣分
+        security_count = len(security_issues)
+        score -= security_count * 10
+        
+        # 风格问题扣分
+        style_count = len(style_violations)
+        score -= style_count * 1
+        
+        # 复杂度扣分
+        avg_complexity = complexity.get('average_complexity', 0)
+        if avg_complexity > 10:
+            score -= 10
+        elif avg_complexity > 5:
+            score -= 5
+        
+        # 确保分数在0-100之间
+        score = max(0, min(100, score))
+        
+        # 生成摘要
+        summary = f"代码审查完成 - 总分: {score}/100\n"
+        summary += f"冲突: {conflict_count} | 安全问题: {security_count} | 风格问题: {style_count} | 平均复杂度: {avg_complexity:.1f}\n"
+        
+        if conflict_count > 0:
+            summary += "⚠️ 发现名称冲突\n"
+        if security_count > 0:
+            summary += "🔒 发现安全问题\n"
+        if style_count > 0:
+            summary += "🎨 发现代码风格问题\n"
+        if avg_complexity > 7:
+            summary += "🧠 代码复杂度较高\n"
+        
+        return summary, score
+
+class SecurityEngine:
+    """安全审计引擎"""
+    
+    def audit_python(self, code: str, file_path: str) -> List[Dict[str, Any]]:
+        """审计Python代码"""
+        issues = []
+        
+        # 使用Bandit进行安全扫描
+        issues.extend(self._run_bandit(code, file_path))
+        
+        # 自定义安全检查
+        issues.extend(self._check_dangerous_functions(code))
+        issues.extend(self._check_security_patterns(code))
+        
+        return issues
+    
+    def audit_javascript(self, code: str) -> List[Dict[str, Any]]:
+        """审计JavaScript代码 (简化版)"""
+        issues = []
+        
+        # 检查危险函数
+        if 'eval(' in code:
+            issues.append({
+                "type": "dangerous_function",
+                "function": "eval",
+                "severity": "high",
+                "description": "使用危险的eval函数"
+            })
+        
+        return issues
+    
+    def audit_generic(self, code: str) -> List[Dict[str, Any]]:
+        """通用代码审计"""
+        issues = []
+        
+        # 检查硬编码凭证
+        for pattern in SECURITY_PATTERNS:
+            if re.search(pattern, code):
+                issues.append({
+                    "type": "hardcoded_secret",
+                    "pattern": pattern,
+                    "severity": "high",
+                    "description": f"发现硬编码敏感信息: {pattern}"
+                })
+        
+        return issues
+    
+    def _run_bandit(self, code: str, file_path: str) -> List[Dict[str, Any]]:
+        """使用Bandit进行安全扫描"""
+        issues = []
+        
+        try:
+            # 创建临时文件
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as tmp:
+                tmp.write(code)
+                tmp_path = tmp.name
+            
+            # 配置Bandit
+            conf = bandit_manager.BanditManager(
+                config=None,
+                agg_type='file',
+                debug=False,
+                verbose=False
+            )
+            
+            # 运行Bandit
+            conf.discover_files([tmp_path], False)
+            conf.run_tests()
+            
+            # 获取结果
+            results = conf.results
+            for result in results:
+                for issue in result:
+                    issues.append({
+                        "type": "bandit_issue",
+                        "test_id": issue.test_id,
+                        "severity": issue.severity,
+                        "confidence": issue.confidence,
+                        "description": issue.text,
+                        "line": issue.lineno,
+                        "code": issue.code
+                    })
+            
+            # 删除临时文件
+            os.unlink(tmp_path)
+            
+        except Exception as e:
+            logger.error(f"Bandit扫描失败: {e}")
+        
+        return issues
+    
+    def _check_dangerous_functions(self, code: str) -> List[Dict[str, Any]]:
+        """检查危险函数使用"""
+        issues = []
+        try:
+            tree = ast.parse(code)
+            
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Call):
+                    # 修复：同时处理 ast.Name 和 ast.Attribute
+                    if isinstance(node.func, ast.Name):
+                        func_name = node.func.id
+                        if func_name in DANGEROUS_FUNCTIONS:
+                            issues.append({
+                                "type": "dangerous_function",
+                                "function": func_name,
+                                "severity": "high",
+                                "description": f"使用危险函数: {func_name}",
+                                "line": node.lineno
+                            })
+                    
+                    elif isinstance(node.func, ast.Attribute):
+                        if isinstance(node.func.value, ast.Name):
+                            func_name = f"{node.func.value.id}.{node.func.attr}"
+                        else:
+                            func_name = node.func.attr
+                            
+                        if func_name in DANGEROUS_FUNCTIONS:
+                            issues.append({
+                                "type": "dangerous_function",
+                                "function": func_name,
+                                "severity": "high",
+                                "description": f"使用危险函数: {func_name}",
+                                "line": node.lineno
+                            })
+        except SyntaxError as e:
+            logger.error(f"危险函数检查失败: {e}")
+        
+        return issues
+    
+    def _check_security_patterns(self, code: str) -> List[Dict[str, Any]]:
+        """检查安全模式"""
+        issues = []
+        
+        # 修复：使用分行的方式获取准确行号
+        lines = code.split('\n')
+        for line_num, line in enumerate(lines, 1):
+            for pattern in SECURITY_PATTERNS:
+                if re.search(pattern, line):
+                    issues.append({
+                        "type": "security_pattern",
+                        "pattern": pattern,
+                        "severity": "medium",
+                        "description": f"发现潜在安全问题: {pattern}",
+                        "line": line_num,
+                        "code_snippet": line.strip()
+                    })
+        
+        return issues
+
+class StyleEngine:
+    """代码风格检查引擎"""
+    
+    def check_python_style(self, code: str, file_path: str) -> List[Dict[str, Any]]:
+        """检查Python代码风格"""
+        violations = []
+        
+        # 使用flake8检查风格
+        try:
+            # 创建临时文件
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as tmp:
+                tmp.write(code)
+                tmp_path = tmp.name
+            
+            # 运行flake8
+            style_guide = flake8.api.StyleGuide()
+            result = style_guide.check_files([tmp_path])
+            
+            # 解析结果
+            for error in result.get_statistics('E'):
+                violations.append({
+                    "type": "flake8_error",
+                    "code": error.code,
+                    "description": error.text,
+                    "line": error.line_number,
+                    "column": error.column_number
+                })
+            
+            for warning in result.get_statistics('W'):
+                violations.append({
+                    "type": "flake8_warning",
+                    "code": warning.code,
+                    "description": warning.text,
+                    "line": warning.line_number,
+                    "column": warning.column_number
+                })
+            
+            # 删除临时文件
+            os.unlink(tmp_path)
+            
+        except Exception as e:
+            logger.error(f"Flake8检查失败: {e}")
+        
+        return violations
+    
+    def format_python_code(self, code: str) -> str:
+        """格式化Python代码"""
+        try:
+            return autopep8.fix_code(code)
+        except Exception as e:
+            logger.error(f"代码格式化失败: {e}")
+            return code
+
+# 全局审查器实例
+code_reviewer = CodeReviewer()
+
+def review_code_action(core, params: dict) -> dict:
+    """审查代码文件"""
+    file_path = params.get("file_path", "")
+    insert_code = params.get("insert_code", None)
+    
+    if not file_path:
+        return {"status": "error", "message": "缺少 file_path 参数"}
+    
+    return code_reviewer.review_code(file_path, insert_code)
+
+def format_code_action(core, params: dict) -> dict:
+    """格式化代码"""
+    code = params.get("code", "")
+    
+    if not code:
+        return {"status": "error", "message": "缺少 code 参数"}
+    
+    try:
+        formatted = StyleEngine().format_python_code(code)
+        return {
+            "status": "success",
+            "original_code": code,
+            "formatted_code": formatted
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+def register():
+    return {
+        "review_code": review_code_action,
+        "format_code": format_code_action
+    }
+
+def register_actions(dispatcher):
+    """
+    注册代码审查模块动作
+    
+    :param dispatcher: 调度器实例
+    """
+    dispatcher.register_action(
+        "review_code", 
+        review_code_action,
+        description="执行代码审查",
+        parameters={
+            "file_path": {"type": "string", "description": "代码文件路径"},
+            "insert_code": {"type": "string", "description": "要插入的代码", "optional": True}
+        },
+        module_name="modules.code_reviewer"
+    )
+    
+    dispatcher.register_action(
+        "format_code", 
+        format_code_action,
+        description="格式化代码",
+        parameters={
+            "code": {"type": "string", "description": "要格式化的代码"}
+        },
+        module_name="modules.code_reviewer"
+    )
+    
+    logger.info("代码审查模块动作注册完成")
+
+if __name__ == "__main__":
+    # 测试示例
+    test_file = "/tmp/test_review.py"
+    
+    # 创建测试文件
+    with open(test_file, 'w') as f:
+        f.write("""
+import os
+
+def existing_func():
+    print("Hello")
+
+# 危险函数示例
+def dangerous():
+    os.system("rm -rf /")
+    eval("bad code")
+""")
+    
+    # 测试代码审查
+    print("=== 测试代码审查 ===")
+    result = review_code_action(None, {"file_path": test_file})
+    import pprint
+    pprint.pprint(result)
+    
+    # 测试代码格式化
+    print("\n=== 测试代码格式化 ===")
+    code = "def test():\n    print('hello')"
+    result = format_code_action(None, {"code": code})
+    print("原始代码:")
+    print(code)
+    print("格式化后:")
+    print(result["formatted_code"])

@@ -1,0 +1,140 @@
+{
+  "name": "virtual_avatar",
+  "version": "1.1.0",
+  "title": "三花聚顶 · 虚拟形象模块（企业演示旗舰版）",
+  "author": "三花聚顶开发团队",
+  "author_contact": "support@sanhuajuding.com",
+  "description": "为三花聚顶提供事件驱动的虚拟人物动画与表情系统，支持 GUI 前端可视化、无前端时自动降级日志，兼容 virtual_avatar.* 与 avatar.* 双前缀动作调用，可根据系统与业务事件动态响应。",
+  "license": "MIT",
+  "repository": "https://github.com/sanhuajuding/virtual_avatar",
+  "entry": "module.py",
+  "entry_class": "modules.virtual_avatar.module.VirtualAvatarModule",
+  "enabled": true,
+  "entry_points": [
+    "core",
+    "gui"
+  ],
+  "icon": "🧍‍♂️",
+  "health_check": true,
+  "hot_pluggable": true,
+  "singleton": true,
+  "status": "stable",
+  "categories": [
+    "gui",
+    "avatar",
+    "animation",
+    "enterprise"
+  ],
+  "tags": [
+    "虚拟形象",
+    "avatar",
+    "动画",
+    "事件驱动",
+    "企业演示",
+    "gui",
+    "前端交互"
+  ],
+  "dependencies": [],
+  "actions": [
+    {
+      "name": "virtual_avatar.start",
+      "description": "启动虚拟形象并播放开场动画",
+      "permission": "user",
+      "aliases": [
+        "启动虚拟形象",
+        "显示虚拟形象",
+        "打开虚拟形象"
+      ]
+    },
+    {
+      "name": "virtual_avatar.show",
+      "description": "显示虚拟形象（不重置状态）",
+      "permission": "user",
+      "aliases": [
+        "显示形象",
+        "形象出现"
+      ]
+    },
+    {
+      "name": "virtual_avatar.stop",
+      "description": "隐藏虚拟形象并播放关场动画",
+      "permission": "user",
+      "aliases": [
+        "隐藏虚拟形象",
+        "关闭虚拟形象"
+      ]
+    },
+    {
+      "name": "virtual_avatar.play",
+      "description": "播放指定虚拟形象动画",
+      "permission": "user",
+      "aliases": [
+        "播放动画",
+        "avatar播放"
+      ]
+    },
+    {
+      "name": "virtual_avatar.pose",
+      "description": "设置虚拟形象的表情或姿态",
+      "permission": "user",
+      "aliases": [
+        "设置表情",
+        "设置姿态"
+      ]
+    },
+    {
+      "name": "virtual_avatar.say",
+      "description": "让虚拟形象说一句话并联动表情/动画",
+      "permission": "user",
+      "aliases": [
+        "形象说话",
+        "avatar说话"
+      ]
+    },
+    {
+      "name": "virtual_avatar.health",
+      "description": "获取虚拟形象健康状态",
+      "permission": "user"
+    },
+    {
+      "name": "virtual_avatar.switch",
+      "description": "切换虚拟形象资源",
+      "permission": "admin",
+      "aliases": [
+        "切换形象",
+        "更换虚拟形象"
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "system_shutdown",
+      "description": "系统关闭时触发的虚拟形象事件"
+    },
+    {
+      "name": "performance_alert",
+      "description": "性能警报时触发的虚拟形象事件"
+    },
+    {
+      "name": "fedora_update",
+      "description": "Fedora 系统更新时触发的虚拟形象事件"
+    },
+    {
+      "name": "avatar.say",
+      "description": "虚拟形象说话事件"
+    },
+    {
+      "name": "avatar.react",
+      "description": "虚拟形象表情/动作反应事件"
+    }
+  ],
+  "config_schema": {
+    "avatar_id": {
+      "type": "string",
+      "default": "default",
+      "description": "当前虚拟形象的 ID，用于切换资源"
+    }
+  },
+  "market_compatible": true,
+  "is_entry": true
+}

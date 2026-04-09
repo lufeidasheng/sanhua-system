@@ -1,0 +1,30 @@
+{
+  "id": "aicore",
+  "name": "AI核心模块",
+  "version": "1.0.0",
+  "author": "徐鹏鹏",
+  "description": "聚核助手的AI内核模块，包含模型引擎、动作调度、记忆管理等功能。",
+  "entry": "aicore.py",
+  "dependencies": [],
+  "modules": [
+    "action_manager",
+    "actions.action_dispatcher",
+    "actions.action_handlers",
+    "context_manager",
+    "memory.memory_engine",
+    "memory.memory_manager",
+    "model_engine"
+  ],
+  "commands": [
+    {
+      "name": "chat",
+      "description": "AI对话接口",
+      "function": "AICore.chat"
+    },
+    {
+      "name": "shutdown",
+      "description": "关闭AI内核",
+      "function": "AICore.shutdown"
+    }
+  ]
+}

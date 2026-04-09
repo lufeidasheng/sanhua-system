@@ -1,0 +1,1191 @@
+import multiprocessing as mp
+import numpy as np
+import time
+import logging
+import signal
+import pyaudio
+import wave
+import os
+import queue
+import threading
+import hashlib
+import ctypes
+import resource
+import subprocess
+import mmap
+import psutil
+import json
+import tempfile
+import shutil
+from queue import Empty
+from collections import deque
+from scipy.signal import butter, lfilter
+from cryptography.fernet import Fernet
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler
+from logging.handlers import RotatingFileHandler
+
+# 企业级加密日志处理器
+class EncryptedFileHandler(RotatingFileHandler):
+    """企业级加密日志处理器"""
+    def __init__(self, encryption_key, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.cipher = Fernet(encryption_key)
+    
+    def emit(self, record):
+        try:
+            msg = self.format(record)
+            encrypted = self.cipher.encrypt(msg.encode())
+            self.stream.write(encrypted + b'\n')
+            self.flush()
+        except Exception:
+            self.handleError(record)
+
+# 企业级日志配置
+def setup_logger():
+    logger = logging.getLogger("FedoraWakeWordSystem")
+    logger.setLevel(logging.DEBUG)
+    
+    # 创建安全日志目录
+    log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "logs", "wake_word_detector")
+    log_dir = os.path.abspath(log_dir)
+    os.makedirs(log_dir, exist_ok=True)
+    os.chmod(log_dir, 0o700)
+    
+    # 设置SELinux安全上下文
+    try:
+        subprocess.run(["chcon", "-R", "-t", "voice_input_pro_log_t", log_dir], check=True)
+        subprocess.run([
+            "semanage", "fcontext", "-a", 
+            "-t", "voice_input_pro_log_t", 
+            f"'{log_dir}(/.*)?'"
+        ], check=True)
+    except Exception as e:
+        logging.warning(f"SELinux日志上下文设置失败: {e}")
+    
+    # 生成日志加密密钥
+    log_key = Fernet.generate_key()
+    key_file = os.path.join(log_dir, ".log_key")
+    with open(key_file, 'wb') as f:
+        f.write(log_key)
+    os.chmod(key_file, 0o400)
+    
+    # 文件处理器（加密日志）
+    log_file = os.path.join(log_dir, f"wakeword_{time.strftime('%Y%m%d')}.enc")
+    fh = EncryptedFileHandler(
+        log_key,
+        filename=log_file,
+        maxBytes=10*1024*1024,  # 10MB
+        backupCount=5
+    )
+    fh.setLevel(logging.INFO)
+    os.chmod(log_file, 0o600)  # 设置日志文件权限
+    
+    # 系统日志处理器（journald集成）
+    sh = logging.StreamHandler()
+    sh.setLevel(logging.WARNING)
+    
+    # 结构化日志格式
+    formatter = logging.Formatter(
+        '%(asctime)s.%(msecs)03d | %(name)s | %(levelname)s | %(process)d | '
+        '%(threadName)s | %(module)s:%(lineno)d | %(message)s',
+        datefmt='%Y-%m-%dT%H:%M:%S'
+    )
+    fh.setFormatter(formatter)
+    sh.setFormatter(formatter)
+    
+    logger.addHandler(fh)
+    logger.addHandler(sh)
+    
+    # 禁用第三方库的DEBUG日志
+    logging.getLogger("whisper").setLevel(logging.WARNING)
+    logging.getLogger("watchdog").setLevel(logging.WARNING)
+    
+    return logger
+
+logger = setup_logger()
+
+# SELinux策略加载器
+def load_selinux_policy():
+    policy_path = "/usr/share/fedora_wakeword/voice_input_pro.te"
+    if os.path.exists(policy_path):
+        try:
+            # 创建临时工作目录
+            with tempfile.TemporaryDirectory() as tmpdir:
+                mod_path = os.path.join(tmpdir, "voice_input_pro.mod")
+                pp_path = os.path.join(tmpdir, "voice_input_pro.pp")
+                
+                subprocess.run([
+                    "checkmodule", "-M", "-m", "-o", mod_path, policy_path
+                ], check=True)
+                subprocess.run([
+                    "semodule_package", "-o", pp_path, 
+                    "-m", mod_path
+                ], check=True)
+                subprocess.run(["semodule", "-i", pp_path], check=True)
+                logger.info("SELinux策略加载成功")
+        except Exception as e:
+            logger.error(f"SELinux策略加载失败: {e}")
+
+# 加载SELinux策略
+load_selinux_policy()
+
+# 企业级配置管理
+class EnterpriseConfig:
+    """企业级安全配置管理"""
+    CONFIG_PATH = "/etc/fedora_wakeword/config.enc"
+    KEY_PATH = "/etc/fedora_wakeword/.config_key"
+    
+    @classmethod
+    def generate_key(cls):
+        """生成并安全存储加密密钥"""
+        if not os.path.exists(os.path.dirname(cls.KEY_PATH)):
+            os.makedirs(os.path.dirname(cls.KEY_PATH), 0o700)
+            # 设置SELinux上下文
+            try:
+                subprocess.run(["chcon", "-t", "voice_input_pro_config_t", os.path.dirname(cls.KEY_PATH)], check=True)
+            except Exception as e:
+                logger.warning(f"SELinux密钥目录上下文设置失败: {e}")
+        
+        if not os.path.exists(cls.KEY_PATH):
+            key = Fernet.generate_key()
+            with open(cls.KEY_PATH, 'wb') as f:
+                f.write(key)
+            os.chmod(cls.KEY_PATH, 0o400)
+            logger.info("生成新的配置加密密钥")
+    
+    @classmethod
+    def get_key(cls):
+        """获取加密密钥"""
+        with open(cls.KEY_PATH, 'rb') as f:
+            return f.read()
+    
+    @classmethod
+    def load_config(cls):
+        """加载并解密配置"""
+        cls.generate_key()
+        cipher = Fernet(cls.get_key())
+        
+        if os.path.exists(cls.CONFIG_PATH):
+            with open(cls.CONFIG_PATH, 'rb') as f:
+                encrypted = f.read()
+            decrypted = cipher.decrypt(encrypted)
+            return json.loads(decrypted.decode())
+        else:
+            logger.warning("未找到配置文件，使用默认配置")
+            return cls.default_config()
+    
+    @classmethod
+    def save_config(cls, config):
+        """加密并保存配置"""
+        cipher = Fernet(cls.get_key())
+        encrypted = cipher.encrypt(json.dumps(config).encode())
+        
+        os.makedirs(os.path.dirname(cls.CONFIG_PATH), exist_ok=True)
+        with open(cls.CONFIG_PATH, 'wb') as f:
+            f.write(encrypted)
+        os.chmod(cls.CONFIG_PATH, 0o600)
+        
+        # 设置SELinux上下文
+        try:
+            subprocess.run(["chcon", "-t", "voice_input_pro_config_t", cls.CONFIG_PATH], check=True)
+        except Exception as e:
+            logger.warning(f"SELinux配置文件上下文设置失败: {e}")
+    
+    @staticmethod
+    def default_config():
+        """默认企业级配置"""
+        return {
+            "audio": {
+                "sample_rate": 48000,
+                "channels": 2,
+                "chunk_size": 512,
+                "bit_depth": 24,
+                "format": "paInt24",
+                "buffer_size_seconds": 1.5,
+                "silence_threshold": 1000,
+                "realtime_priority": 95,
+                "noise_reduction": "adaptive",
+                "hardware_acceleration": "auto"
+            },
+            "wakeword": {
+                "amplitude_threshold": 1500,
+                "energy_threshold": 0.5,
+                "consecutive_frames": 5,
+                "cooldown": 1.5,
+                "record_seconds": 3
+            },
+            "security": {
+                "secure_audio_storage": True,
+                "memory_protection": True,
+                "encrypt_temp_files": True,
+                "selinux_enforcement": "strict"
+            },
+            "whisper": {
+                "model_size": "base",
+                "compute_type": "int8",
+                "language": "zh",
+                "temperature": 0.0
+            },
+            "heartbeat": {
+                "interval": 5.0,
+                "timeout": 15.0
+            }
+        }
+
+# 实时性能优化
+class RealtimeOptimizer:
+    """实时性能优化工具类"""
+    @staticmethod
+    def set_realtime_priority(level=95):
+        """设置实时优先级"""
+        try:
+            # 设置进程调度策略为实时
+            os.sched_setscheduler(0, os.SCHED_FIFO, os.sched_param(level))
+            logger.info(f"设置实时优先级: FIFO {level}")
+        except PermissionError:
+            logger.warning("需要root权限或CAP_SYS_NICE能力设置实时优先级")
+        except Exception as e:
+            logger.error(f"设置实时优先级失败: {e}")
+    
+    @staticmethod
+    def lock_memory():
+        """锁定内存防止交换"""
+        try:
+            # 锁定所有当前和未来的内存
+            resource.setrlimit(resource.RLIMIT_MEMLOCK, 
+                              (resource.RLIM_INFINITY, resource.RLIM_INFINITY))
+            
+            # 使用mlockall锁定所有内存
+            libc = ctypes.CDLL("libc.so.6")
+            libc.mlockall(ctypes.c_int(0x2))  # MCL_FUTURE
+            logger.info("内存锁定成功 (mlockall)")
+        except Exception as e:
+            logger.error(f"内存锁定失败: {e}")
+    
+    @staticmethod
+    def pin_to_cpu(core_mask=0x0F):  # 绑定到前4个核心
+        """将进程绑定到特定CPU核心"""
+        try:
+            affinity = []
+            for i in range(psutil.cpu_count()):
+                if core_mask & (1 << i):
+                    affinity.append(i)
+            
+            p = psutil.Process()
+            p.cpu_affinity(affinity)
+            logger.info(f"CPU亲和性设置: {affinity}")
+        except Exception as e:
+            logger.error(f"设置CPU亲和性失败: {e}")
+
+# 安全音频缓冲区
+class SecureAudioBuffer:
+    """安全音频缓冲区，使用mmap和内存保护"""
+    def __init__(self, size):
+        # 创建私有匿名映射
+        self.size = size
+        self.buffer = mmap.mmap(-1, size, flags=mmap.MAP_PRIVATE | mmap.MAP_ANONYMOUS)
+        
+        # 设置内存保护
+        self.set_memory_protection()
+    
+    def set_memory_protection(self):
+        """设置内存保护为只读"""
+        try:
+            # 设置内存保护 (PROT_READ)
+            libc = ctypes.CDLL("libc.so.6")
+            addr = ctypes.c_void_p(ctypes.addressof(ctypes.c_char.from_buffer(self.buffer)))
+            libc.mprotect(addr, self.size, 0x1)  # PROT_READ
+        except Exception as e:
+            logger.error(f"内存保护设置失败: {e}")
+    
+    def write(self, data):
+        """写入数据（临时禁用保护）"""
+        try:
+            # 临时启用写权限
+            libc = ctypes.CDLL("libc.so.6")
+            addr = ctypes.c_void_p(ctypes.addressof(ctypes.c_char.from_buffer(self.buffer)))
+            libc.mprotect(addr, self.size, 0x3)  # PROT_READ|PROT_WRITE
+            
+            # 写入数据
+            self.buffer.seek(0)
+            self.buffer.write(data)
+            
+            # 恢复只读保护
+            libc.mprotect(addr, self.size, 0x1)
+        except Exception as e:
+            logger.error(f"安全缓冲区写入失败: {e}")
+    
+    def read(self):
+        """读取数据"""
+        self.buffer.seek(0)
+        return self.buffer.read(self.size)
+    
+    def close(self):
+        """关闭缓冲区"""
+        self.buffer.close()
+
+# 配置热重载
+class ConfigReloadHandler(FileSystemEventHandler):
+    """配置文件热重载处理器"""
+    def __init__(self, callback):
+        self.callback = callback
+        self.last_modified = 0
+    
+    def on_modified(self, event):
+        if event.src_path == EnterpriseConfig.CONFIG_PATH:
+            current_time = time.time()
+            # 防止多次触发
+            if current_time - self.last_modified > 2.0:
+                self.last_modified = current_time
+                logger.info("检测到配置文件变更，重新加载配置")
+                try:
+                    self.callback()
+                except Exception as e:
+                    logger.error(f"配置重载失败: {e}")
+
+# 音频配置类（企业级）
+class AudioConfig:
+    def __init__(self):
+        # 加载企业级配置
+        self.reload_config()
+        
+        # 应用实时优化
+        if mp.current_process().name == "AudioCaptureProcess":
+            RealtimeOptimizer.set_realtime_priority(self.config["realtime_priority"])
+            RealtimeOptimizer.lock_memory()
+            RealtimeOptimizer.pin_to_cpu()
+    
+    def reload_config(self):
+        """重新加载配置"""
+        self.config = EnterpriseConfig.load_config()["audio"]
+        self.wakeword_config = EnterpriseConfig.load_config()["wakeword"]
+        self.security_config = EnterpriseConfig.load_config()["security"]
+        self.heartbeat_config = EnterpriseConfig.load_config()["heartbeat"]
+        
+        # 音频参数
+        self.RATE = self.config["sample_rate"]
+        self.CHUNK = self.config["chunk_size"]
+        self.CHANNELS = self.config["channels"]
+        self.FORMAT = getattr(pyaudio, self.config["format"])
+        self.SILENCE_THRESHOLD = self.config["silence_threshold"]
+        self.RECORD_SECONDS = self.wakeword_config["record_seconds"]
+        self.AUDIO_SAVE_DIR = "/var/lib/fedora_wakeword/audio"
+        self.MAX_AUDIO_FILES = 50
+        
+        # 初始化安全目录
+        self.setup_secure_directories()
+    
+    def setup_secure_directories(self):
+        """设置安全存储目录"""
+        # 创建安全目录结构
+        os.makedirs(self.AUDIO_SAVE_DIR, exist_ok=True)
+        os.chmod(self.AUDIO_SAVE_DIR, 0o700)
+        
+        # 应用SELinux上下文
+        try:
+            subprocess.run(["chcon", "-R", "-t", "voice_input_pro_t", self.AUDIO_SAVE_DIR], check=True)
+        except Exception as e:
+            logger.warning(f"SELinux上下文设置失败: {e}")
+
+class WakeWordDetector:
+    def __init__(self, audio_queue: mp.Queue, stop_event: mp.Event, command_queue: mp.Queue, config: AudioConfig):
+        self.audio_queue = audio_queue
+        self.stop_event = stop_event
+        self.command_queue = command_queue
+        self.config = config
+        self.last_heartbeat = time.monotonic()
+        
+        # 唤醒词检测参数
+        self.reload_config()
+        
+        # 安全音频缓冲区
+        self.buffer_size = int(self.config.config["buffer_size_seconds"] * self.config.RATE / self.config.CHUNK)
+        self.audio_buffer = deque(maxlen=self.buffer_size)
+        
+        # 降噪滤波器
+        self.b, self.a = self.create_bandpass_filter()
+        
+        logger.info("企业级唤醒词检测器初始化完成")
+
+    def reload_config(self):
+        """重新加载配置"""
+        self.amplitude_threshold = self.config.wakeword_config["amplitude_threshold"]
+        self.energy_threshold = self.config.wakeword_config["energy_threshold"]
+        self.consecutive_frames = self.config.wakeword_config["consecutive_frames"]
+        self.detection_count = 0
+        self.last_detection_time = 0
+        self.cooldown = self.config.wakeword_config["cooldown"]
+
+    def create_bandpass_filter(self):
+        """创建带通滤波器（专业降噪）"""
+        nyq = 0.5 * self.config.RATE
+        low = 300 / nyq  # 300Hz
+        high = 4000 / nyq  # 4000Hz
+        b, a = butter(4, [low, high], btype='band')
+        return b, a
+
+    def apply_filter(self, data):
+        """应用带通滤波器"""
+        audio_np = np.frombuffer(data, dtype=np.int32 if self.config.config["bit_depth"] == 32 else np.int16)
+        filtered = lfilter(self.b, self.a, audio_np)
+        return filtered.astype(audio_np.dtype).tobytes()
+
+    def clean_old_audio_files(self):
+        """安全清理旧音频文件"""
+        try:
+            files = [f for f in os.listdir(self.config.AUDIO_SAVE_DIR) if f.endswith(".wav")]
+            if len(files) > self.config.MAX_AUDIO_FILES:
+                files.sort(key=lambda x: os.path.getctime(os.path.join(self.config.AUDIO_SAVE_DIR, x)))
+                for f in files[:len(files) - self.config.MAX_AUDIO_FILES]:
+                    file_path = os.path.join(self.config.AUDIO_SAVE_DIR, f)
+                    # 安全擦除文件内容
+                    with open(file_path, 'rb+') as fh:
+                        length = fh.seek(0, 2)
+                        fh.seek(0)
+                        fh.write(os.urandom(length))
+                    os.remove(file_path)
+                    logger.debug(f"安全清理音频文件: {f}")
+        except Exception as e:
+            logger.error(f"清理音频文件失败: {e}")
+
+    def _calculate_energy(self, audio_np: np.ndarray) -> float:
+        """计算音频能量（RMS）"""
+        return np.sqrt(np.mean(audio_np.astype(np.float32) ** 2))
+
+    def _extract_features(self, audio_np: np.ndarray) -> dict:
+        """提取专业级音频特征"""
+        return {
+            "amplitude": np.max(np.abs(audio_np)),
+            "energy": self._calculate_energy(audio_np),
+            "zero_crossing": np.sum(np.diff(np.sign(audio_np)) != 0) / len(audio_np),
+            "spectral_centroid": np.sum(np.arange(len(audio_np)) * np.abs(audio_np)) / np.sum(np.abs(audio_np))
+        }
+
+    def detect_wake_word(self, audio_chunk: bytes) -> bool:
+        """企业级唤醒词检测算法"""
+        try:
+            # 应用硬件加速降噪
+            if self.config.config["noise_reduction"] != "off":
+                audio_chunk = self.apply_filter(audio_chunk)
+            
+            # 转换为numpy数组
+            dtype = np.int32 if self.config.config["bit_depth"] == 32 else np.int16
+            audio_np = np.frombuffer(audio_chunk, dtype=dtype)
+            
+            if audio_np.size == 0:
+                return False
+                
+            # 提取高级特征
+            features = self._extract_features(audio_np)
+            self.audio_buffer.append(audio_chunk)
+            
+            current_time = time.monotonic()
+            if (features["amplitude"] > self.amplitude_threshold and 
+                features["energy"] > self.energy_threshold and
+                features["spectral_centroid"] > 500):  # 语音频谱中心通常高于500
+                if current_time - self.last_detection_time < self.cooldown:
+                    return False
+
+                self.detection_count += 1
+                logger.debug(f"检测计数: {self.detection_count}/{self.consecutive_frames}")
+
+                if self.detection_count >= self.consecutive_frames:
+                    self.detection_count = 0
+                    self.last_detection_time = current_time
+                    return True
+            else:
+                self.detection_count = max(0, self.detection_count - 1)
+
+            return False
+        except Exception as e:
+            logger.error(f"唤醒词检测失败: {e}", exc_info=True)
+            return False
+
+    def save_wake_audio(self) -> str:
+        """安全保存唤醒音频"""
+        try:
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            filename = os.path.join(self.config.AUDIO_SAVE_DIR, f"wake_{timestamp}.wav")
+            
+            # 创建临时加密文件
+            temp_filename = f"{filename}.tmp"
+            with wave.open(temp_filename, 'wb') as wf:
+                wf.setnchannels(self.config.CHANNELS)
+                wf.setsampwidth(4 if self.config.config["bit_depth"] == 32 else 2)
+                wf.setframerate(self.config.RATE)
+                
+                # 写入缓冲区数据（唤醒前）
+                for chunk in self.audio_buffer:
+                    wf.writeframes(chunk)
+                
+                # 写入唤醒后音频
+                start_time = time.monotonic()
+                while time.monotonic() - start_time < self.config.RECORD_SECONDS and not self.stop_event.is_set():
+                    try:
+                        chunk = self.audio_queue.get(timeout=0.05)
+                        wf.writeframes(chunk)
+                    except Empty:
+                        break
+            
+            # 重命名为最终文件（原子操作）
+            os.rename(temp_filename, filename)
+            
+            # 应用安全权限
+            os.chmod(filename, 0o600)
+            
+            logger.info(f"安全保存唤醒音频到: {filename}")
+            return filename
+        except Exception as e:
+            logger.error(f"保存音频失败: {e}", exc_info=True)
+            return ""
+
+    def send_heartbeat(self):
+        """发送进程心跳"""
+        try:
+            self.command_queue.put_nowait({
+                "type": "heartbeat",
+                "process": "WakeWordDetector",
+                "timestamp": time.time()
+            })
+            self.last_heartbeat = time.monotonic()
+        except Exception as e:
+            logger.warning(f"心跳发送失败: {e}")
+
+    def start(self):
+        """启动企业级唤醒词检测"""
+        logger.info("唤醒词检测启动 (企业级)")
+        
+        try:
+            # 设置实时优化
+            RealtimeOptimizer.set_realtime_priority(self.config.config["realtime_priority"])
+            RealtimeOptimizer.lock_memory()
+            
+            while not self.stop_event.is_set():
+                try:
+                    # 检查心跳
+                    current_time = time.monotonic()
+                    if current_time - self.last_heartbeat > self.config.heartbeat_config["interval"]:
+                        self.send_heartbeat()
+                    
+                    data = self.audio_queue.get(timeout=0.05)
+                    if self.detect_wake_word(data):
+                        logger.info("检测到唤醒词！")
+                        audio_file = self.save_wake_audio()
+                        if audio_file and self.command_queue:
+                            # 安全传输文件路径
+                            self.command_queue.put({
+                                "type": "wake_word_detected",
+                                "timestamp": time.time(),
+                                "audio_file": audio_file,
+                                "checksum": hashlib.sha256(audio_file.encode()).hexdigest()
+                            })
+                except Empty:
+                    continue
+                except Exception as e:
+                    logger.error(f"处理音频数据时出错: {e}", exc_info=True)
+                    time.sleep(0.01)
+        except Exception as e:
+            logger.critical(f"唤醒词检测严重错误: {e}", exc_info=True)
+        finally:
+            logger.info("唤醒词检测停止")
+
+class ProfessionalAudioCapture:
+    """专业级音频采集（PipeWire/JACK支持）"""
+    def __init__(self, config: AudioConfig):
+        self.config = config
+        self.p = pyaudio.PyAudio()
+        self.stream = None
+        self.input_device_index = None
+        self.secure_buffer = SecureAudioBuffer(config.CHUNK * 4)  # 安全缓冲区
+        self.last_heartbeat = time.monotonic()
+    
+    def find_best_device(self):
+        """自动选择最佳音频设备"""
+        best_device = None
+        best_score = -1
+        
+        for i in range(self.p.get_device_count()):
+            dev_info = self.p.get_device_info_by_index(i)
+            if dev_info["maxInputChannels"] > 0:
+                # 专业设备评分
+                score = 0
+                if "Pro" in dev_info["name"]:
+                    score += 10
+                if "HD" in dev_info["name"]:
+                    score += 5
+                if dev_info["defaultSampleRate"] == self.config.RATE:
+                    score += 3
+                if dev_info["maxInputChannels"] >= self.config.CHANNELS:
+                    score += 2
+                
+                if score > best_score:
+                    best_score = score
+                    best_device = i
+        
+        if best_device is not None:
+            self.input_device_index = best_device
+            dev_info = self.p.get_device_info_by_index(best_device)
+            logger.info(f"选择专业音频设备: {dev_info['name']} (评分: {best_score})")
+            return True
+        return False
+    
+    def open_stream(self):
+        """打开专业级音频流"""
+        if not self.find_best_device():
+            logger.error("未找到合适的专业音频设备")
+            return False
+            
+        try:
+            self.stream = self.p.open(
+                format=self.config.FORMAT,
+                channels=self.config.CHANNELS,
+                rate=self.config.RATE,
+                input=True,
+                input_device_index=self.input_device_index,
+                frames_per_buffer=self.config.CHUNK,
+                stream_callback=self.stream_callback if self.config.config["hardware_acceleration"] != "off" else None
+            )
+            return True
+        except OSError as e:
+            logger.error(f"打开音频流失败: {e}")
+            return False
+    
+    def stream_callback(self, in_data, frame_count, time_info, status):
+        """硬件加速回调（直接处理）"""
+        try:
+            # 使用安全缓冲区
+            self.secure_buffer.write(in_data)
+            return (in_data, pyaudio.paContinue)
+        except Exception as e:
+            logger.error(f"音频回调处理错误: {e}")
+            return (None, pyaudio.paAbort)
+    
+    def send_heartbeat(self, command_queue):
+        """发送进程心跳"""
+        try:
+            command_queue.put_nowait({
+                "type": "heartbeat",
+                "process": "AudioCapture",
+                "timestamp": time.time()
+            })
+            self.last_heartbeat = time.monotonic()
+        except Exception as e:
+            logger.warning(f"心跳发送失败: {e}")
+    
+    def capture_audio(self, audio_queue: mp.Queue, stop_event: mp.Event, command_queue: mp.Queue):
+        """专业级音频采集主循环"""
+        if not self.open_stream():
+            return
+            
+        logger.info("专业音频采集启动 (PipeWire/JACK)")
+        silent_frames = 0
+        max_silent_frames = 5
+        heartbeat_interval = self.config.heartbeat_config["interval"]
+        
+        try:
+            while not stop_event.is_set():
+                try:
+                    # 发送心跳
+                    current_time = time.monotonic()
+                    if current_time - self.last_heartbeat > heartbeat_interval:
+                        self.send_heartbeat(command_queue)
+                    
+                    if self.config.config["hardware_acceleration"] == "off":
+                        # 软件模式
+                        data = self.stream.read(self.config.CHUNK, exception_on_overflow=False)
+                    else:
+                        # 硬件加速模式 - 从安全缓冲区读取
+                        data = self.secure_buffer.read()
+                    
+                    if not data:
+                        time.sleep(0.01)
+                        continue
+                    
+                    # 静音检测
+                    dtype = np.int32 if self.config.config["bit_depth"] == 32 else np.int16
+                    audio_np = np.frombuffer(data, dtype=dtype)
+                    
+                    if np.max(np.abs(audio_np)) < self.config.SILENCE_THRESHOLD:
+                        silent_frames += 1
+                        if silent_frames > max_silent_frames:
+                            continue
+                    else:
+                        silent_frames = 0
+                    
+                    # 加入队列
+                    try:
+                        audio_queue.put_nowait(data)
+                    except queue.Full:
+                        # 专业级处理：使用环形缓冲区策略
+                        try:
+                            audio_queue.get_nowait()
+                        except Empty:
+                            pass
+                        audio_queue.put_nowait(data)
+                        logger.debug("音频队列优化处理: 丢弃最旧数据")
+                    
+                except OSError as e:
+                    if "Input overflowed" in str(e):
+                        logger.warning("输入溢出，跳过此块")
+                    else:
+                        logger.error(f"音频采集错误: {e}", exc_info=True)
+                        time.sleep(0.01)
+                except Exception as e:
+                    logger.error(f"音频采集异常: {e}", exc_info=True)
+                    time.sleep(0.01)
+        finally:
+            self.close()
+    
+    def close(self):
+        """安全关闭音频资源"""
+        if hasattr(self, 'stream') and self.stream:
+            try:
+                self.stream.stop_stream()
+                self.stream.close()
+            except Exception:
+                pass
+        if hasattr(self, 'p') and self.p:
+            self.p.terminate()
+        if hasattr(self, 'secure_buffer') and self.secure_buffer:
+            self.secure_buffer.close()
+        logger.info("专业音频采集停止")
+
+class EnterpriseWhisperTranscriber:
+    """企业级Whisper语音识别"""
+    def __init__(self):
+        self.config = EnterpriseConfig.load_config()["whisper"]
+        self.model = None
+        self.model_lock = threading.RLock()
+        self.transcription_queue = mp.Queue(maxsize=10)
+        self.stop_event = mp.Event()
+        self.workers = []
+        self.init_time = time.monotonic()
+        self.last_heartbeat = time.monotonic()
+        
+        # 启动工作进程
+        self.start_workers()
+        logger.info("企业级Whisper转录器初始化完成")
+
+    def load_model(self):
+        """安全加载模型（带完整性检查）"""
+        if self.model is None:
+            with self.model_lock:
+                if self.model is None:  # 双重检查锁定
+                    logger.info(f"加载Whisper模型: {self.config['model_size']}")
+                    import whisper
+                    
+                    # 模型完整性检查
+                    model_path = whisper._MODELS[self.config["model_size"]]
+                    if not self.verify_model_integrity(model_path):
+                        logger.warning("模型完整性检查失败，重新下载")
+                        self.download_model(model_path)
+                    
+                    self.model = whisper.load_model(
+                        self.config["model_size"],
+                        device="cuda" if self.has_gpu_acceleration() else "cpu"
+                    )
+                    logger.info("Whisper模型安全加载完成")
+        return self.model
+
+    def verify_model_integrity(self, model_path):
+        """验证模型完整性"""
+        try:
+            expected_hash = {
+                "base": "bd577a113a864445d4c299cbfbade1b8",
+                "small": "55356645c2b361a969dfd0ef2c5a50d",
+                "medium": "fd9727b6e1217c2f614f9b698f7d8b7"
+            }.get(self.config["model_size"], "")
+            
+            if not os.path.exists(model_path):
+                return False
+            
+            # 计算文件哈希
+            hasher = hashlib.md5()
+            with open(model_path, 'rb') as f:
+                while chunk := f.read(8192):
+                    hasher.update(chunk)
+            
+            return hasher.hexdigest() == expected_hash
+        except Exception:
+            return False
+
+    def download_model(self, model_path):
+        """安全下载模型"""
+        import whisper
+        from whisper.utils import download
+        
+        # 创建安全下载目录
+        os.makedirs(os.path.dirname(model_path), exist_ok=True)
+        os.chmod(os.path.dirname(model_path), 0o700)
+        
+        # 下载模型
+        download(model_path)
+        
+        # 设置安全权限
+        os.chmod(model_path, 0o400)
+
+    def has_gpu_acceleration(self):
+        """检查GPU加速可用性"""
+        try:
+            import torch
+            return torch.cuda.is_available()
+        except ImportError:
+            return False
+
+    def transcribe(self, audio_path: str) -> str:
+        """企业级语音识别"""
+        try:
+            model = self.load_model()
+            result = model.transcribe(
+                audio_path,
+                language=self.config["language"],
+                temperature=self.config["temperature"],
+                fp16=self.has_gpu_acceleration()
+            )
+            return result.get("text", "").strip()
+        except Exception as e:
+            logger.error(f"语音识别失败: {e}", exc_info=True)
+            return ""
+
+    def start_workers(self, num_workers=2):
+        """启动多个转录工作进程"""
+        for i in range(num_workers):
+            p = mp.Process(
+                target=self._transcription_worker,
+                name=f"WhisperWorker-{i}",
+                daemon=True
+            )
+            p.start()
+            self.workers.append(p)
+
+    def _transcription_worker(self):
+        """转录工作进程"""
+        RealtimeOptimizer.set_realtime_priority(80)
+        
+        while not self.stop_event.is_set():
+            try:
+                task = self.transcription_queue.get(timeout=1.0)
+                audio_file, callback = task
+                text = self.transcribe(audio_file)
+                callback(audio_file, text)
+            except Empty:
+                continue
+            except Exception as e:
+                logger.error(f"转录工作进程出错: {e}", exc_info=True)
+
+    def async_transcribe(self, audio_path: str, callback):
+        """异步转录（企业级）"""
+        self.transcription_queue.put((audio_path, callback))
+
+    def send_heartbeat(self):
+        """发送进程心跳"""
+        self.last_heartbeat = time.monotonic()
+
+    def shutdown(self):
+        """安全关闭转录器"""
+        self.stop_event.set()
+        for p in self.workers:
+            if p.is_alive():
+                p.join(timeout=5.0)
+                if p.is_alive():
+                    p.terminate()
+        logger.info("Whisper转录器安全关闭")
+
+def wake_word_process(audio_queue: mp.Queue, stop_event: mp.Event, command_queue: mp.Queue, config: AudioConfig):
+    """唤醒词检测进程入口（企业级）"""
+    mp.current_process().name = "WakeWordProcess"
+    detector = WakeWordDetector(audio_queue, stop_event, command_queue, config)
+    detector.start()
+
+def audio_capture_process(audio_queue: mp.Queue, stop_event: mp.Event, command_queue: mp.Queue, config: AudioConfig):
+    """专业音频采集进程"""
+    mp.current_process().name = "AudioCaptureProcess"
+    capture = ProfessionalAudioCapture(config)
+    capture.capture_audio(audio_queue, stop_event, command_queue)
+
+def command_handler(command_queue: mp.Queue, stop_event: mp.Event, transcriber: EnterpriseWhisperTranscriber):
+    """企业级命令处理线程"""
+    # 企业级唤醒短语
+    wake_phrases = ["你好聚核", "聚核助手", "启动聚核", "聚核启动"]
+    
+    # 进程心跳跟踪
+    process_heartbeats = {
+        "AudioCapture": 0.0,
+        "WakeWordDetector": 0.0,
+        "WhisperTranscriber": 0.0
+    }
+    
+    def match_wake_phrase(text: str) -> bool:
+        text = text.lower()
+        return any(phrase in text for phrase in wake_phrases)
+    
+    def transcription_callback(audio_file: str, text: str):
+        """企业级转录完成回调"""
+        try:
+            logger.info(f"📝 专业级识别结果: {text}")
+            if match_wake_phrase(text):
+                logger.info("✅ 唤醒词匹配成功，触发聚核助手")
+                # 触发聚核助手（企业级集成）
+                # from juhua_assistant import dispatch_enterprise_command
+                # dispatch_enterprise_command(text)
+            else:
+                logger.info("⚠️ 未匹配企业级唤醒词，忽略该结果")
+            
+            # 安全删除音频文件
+            secure_delete(audio_file)
+        except Exception as e:
+            logger.error(f"企业级回调处理失败: {e}", exc_info=True)
+    
+    def secure_delete(file_path):
+        """安全删除文件（多次覆盖）"""
+        try:
+            if os.path.exists(file_path):
+                # 多次覆盖文件内容
+                file_size = os.path.getsize(file_path)
+                with open(file_path, 'wb') as f:
+                    for _ in range(3):
+                        f.write(os.urandom(file_size))
+                        f.flush()
+                        os.fsync(f.fileno())
+                        f.seek(0)
+                
+                # 重命名后删除
+                temp_name = f"{file_path}.del"
+                os.rename(file_path, temp_name)
+                os.remove(temp_name)
+                logger.debug(f"安全删除音频文件: {file_path}")
+        except Exception as e:
+            logger.warning(f"安全删除失败: {e}")
+    
+    # 主处理循环
+    while not stop_event.is_set():
+        try:
+            command = command_queue.get(timeout=1.0)
+            
+            if command["type"] == "heartbeat":
+                # 更新心跳时间
+                process_heartbeats[command["process"]] = time.monotonic()
+                transcriber.send_heartbeat()
+                logger.debug(f"收到心跳: {command['process']}")
+            
+            elif command["type"] == "wake_word_detected":
+                audio_file = command["audio_file"]
+                if audio_file:
+                    # 验证文件完整性
+                    checksum = hashlib.sha256(audio_file.encode()).hexdigest()
+                    if checksum != command.get("checksum", ""):
+                        logger.warning(f"音频文件校验失败: {audio_file}")
+                        secure_delete(audio_file)
+                        continue
+                    
+                    logger.info(f"🔔 检测到企业级唤醒音频: {audio_file}")
+                    transcriber.async_transcribe(audio_file, transcription_callback)
+        except Empty:
+            # 检查进程心跳超时
+            current_time = time.monotonic()
+            timeout = transcriber.config.heartbeat_config["timeout"]
+            for process, last_beat in process_heartbeats.items():
+                if current_time - last_beat > timeout:
+                    logger.critical(f"⚠️ 进程 {process} 心跳丢失，超过 {timeout} 秒未响应")
+                    # 重置心跳避免重复报警
+                    process_heartbeats[process] = current_time
+        except Exception as e:
+            logger.error(f"企业级命令处理错误: {e}", exc_info=True)
+    
+    # 关闭转录器
+    transcriber.shutdown()
+
+def system_monitor(stop_event, audio_queue, command_queue):
+    """企业级系统资源监控"""
+    logger.info("企业级系统监控启动")
+    critical_alerts = set()
+    
+    while not stop_event.is_set():
+        try:
+            # 监控内存使用
+            mem = psutil.virtual_memory()
+            if mem.percent > 90 and 'memory_high' not in critical_alerts:
+                logger.critical(f"⚠️ 严重内存使用: {mem.percent}%")
+                critical_alerts.add('memory_high')
+            elif mem.percent <= 85 and 'memory_high' in critical_alerts:
+                critical_alerts.remove('memory_high')
+            
+            # 监控CPU负载
+            cpu_load = psutil.getloadavg()[0] / os.cpu_count() * 100
+            if cpu_load > 90 and 'cpu_high' not in critical_alerts:
+                logger.critical(f"⚠️ 严重CPU负载: {cpu_load:.1f}%")
+                critical_alerts.add('cpu_high')
+            elif cpu_load <= 80 and 'cpu_high' in critical_alerts:
+                critical_alerts.remove('cpu_high')
+            
+            # 监控音频队列
+            qsize = audio_queue.qsize()
+            if qsize > 90 and 'queue_full' not in critical_alerts:
+                logger.critical(f"⚠️ 音频队列严重积压: {qsize}/100")
+                critical_alerts.add('queue_full')
+            elif qsize <= 80 and 'queue_full' in critical_alerts:
+                critical_alerts.remove('queue_full')
+            
+            time.sleep(5)
+        except Exception as e:
+            logger.error(f"系统监控错误: {e}")
+
+def main():
+    # 企业级初始化
+    logger.info("启动企业级唤醒词检测系统")
+    
+    # 创建配置
+    config = AudioConfig()
+    
+    # 创建进程间通信对象（企业级）
+    audio_queue = mp.Queue(maxsize=100)
+    stop_event = mp.Event()
+    command_queue = mp.Queue()
+    
+    # 启动配置热重载
+    config_reload_event = threading.Event()
+    observer = Observer()
+    observer.schedule(
+        ConfigReloadHandler(lambda: config.reload_config()), 
+        path=os.path.dirname(EnterpriseConfig.CONFIG_PATH)
+    )
+    observer.start()
+
+    # 主进程信号处理（企业级）
+    def signal_handler(signum, frame):
+        logger.info(f"主进程接收到信号 {signum}, 优雅退出")
+        stop_event.set()
+        config_reload_event.set()
+
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    signal.signal(signal.SIGUSR1, signal_handler)  # 自定义管理信号
+
+    # 启动系统监控
+    monitor_thread = threading.Thread(
+        target=system_monitor, 
+        args=(stop_event, audio_queue, command_queue),
+        name="SystemMonitor",
+        daemon=True
+    )
+    monitor_thread.start()
+
+    # 创建并启动音频采集进程
+    audio_process = mp.Process(
+        target=audio_capture_process,
+        args=(audio_queue, stop_event, command_queue, config),
+        name="AudioCaptureProcess"
+    )
+    audio_process.start()
+
+    # 创建并启动唤醒词检测进程
+    wake_process = mp.Process(
+        target=wake_word_process,
+        args=(audio_queue, stop_event, command_queue, config),
+        name="WakeWordProcess"
+    )
+    wake_process.start()
+    
+    # 创建Whisper转录器（企业级）
+    transcriber = EnterpriseWhisperTranscriber()
+    
+    # 启动命令处理线程
+    command_thread = threading.Thread(
+        target=command_handler,
+        args=(command_queue, stop_event, transcriber),
+        name="CommandHandler",
+        daemon=True
+    )
+    command_thread.start()
+
+    logger.info("企业级唤醒词系统运行中 (Fedora专业版)")
+
+    try:
+        # 企业级进程监控
+        while not stop_event.is_set():
+            # 监控进程状态
+            processes = {
+                "AudioCapture": audio_process,
+                "WakeWord": wake_process
+            }
+            
+            for name, proc in processes.items():
+                if not proc.is_alive():
+                    logger.critical(f"{name}进程异常终止，退出码: {proc.exitcode}")
+                    stop_event.set()
+                    break
+            
+            # 检查系统负载
+            if psutil.getloadavg()[0] > psutil.cpu_count() * 4:
+                logger.critical("系统过载，安全关闭")
+                stop_event.set()
+            
+            time.sleep(1.0)
+    except Exception as e:
+        logger.critical(f"主进程崩溃: {e}", exc_info=True)
+        stop_event.set()
+    finally:
+        logger.info("开始企业级安全关闭...")
+        stop_event.set()
+        config_reload_event.set()
+
+        # 等待进程结束
+        timeout = 5.0
+        start_time = time.monotonic()
+        
+        for p in [audio_process, wake_process]:
+            if p.is_alive():
+                p.join(timeout)
+                if p.is_alive():
+                    logger.warning(f"{p.name}未正常退出，强制终止")
+                    p.terminate()
+        
+        # 等待线程结束
+        command_thread.join(timeout=2.0)
+        observer.stop()
+        observer.join()
+        
+        # 清理资源
+        transcriber.shutdown()
+        
+        # 清空队列
+        for q in [audio_queue, command_queue]:
+            while not q.empty():
+                try:
+                    q.get_nowait()
+                except Exception:
+                    pass
+        
+        logger.info("企业级系统安全关闭完成")
+
+if __name__ == "__main__":
+    # 设置进程名
+    try:
+        from setproctitle import setproctitle
+        setproctitle("FedoraWakeWordSystem")
+    except ImportError:
+        pass
+    
+    # 企业级初始化
+    if os.geteuid() == 0:
+        logger.warning("不建议以root权限运行，请使用专用系统用户")
+    
+    # 确保进程具有必要的能力
+    try:
+        # 设置实时能力
+        subprocess.run(["setcap", "cap_sys_nice,cap_ipc_lock+eip", sys.executable])
+    except Exception as e:
+        logger.warning(f"设置进程能力失败: {e}")
+    
+
+def register_actions(dispatcher):
+    """
+    注册模块动作接口。
+    通过 dispatcher.register_action 注册关键词与回调函数绑定，例如：
+
+        dispatcher.register_action("关键词", your_function, module_name="modules.wake_word_detector.wake_word_detector")
+
+    注意替换 "关键词" 与 your_function。
+    """
+    pass

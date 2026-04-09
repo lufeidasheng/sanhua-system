@@ -1,0 +1,8 @@
+# config/user_config.yaml
+user_id: default_user
+dev_mode: true
+preferred_entry: cli
+language: zh
+personalization:
+  enable_learning: false
+  voice_preference: neutral

@@ -1,0 +1,207 @@
+{
+  "name": "stt_module",
+  "version": "1.0.2",
+  "title": "三花聚顶 · STT 语音识别模块（单文件企业版）",
+  "author": "三花聚顶开发团队",
+  "author_contact": "support@sanhuajuding.com",
+  "description": "Whisper 驱动的语音转写模块：GPU/CPU 自动选择、进程隔离、资源监控、自动降级。标准动作：stt.transcribe / stt.health。",
+  "license": "MIT",
+  "repository": "https://github.com/sanhuajuding/stt_module",
+  "entry": "module.py",
+  "entry_class": "modules.stt_module.module.STTModule",
+  "enabled": true,
+  "entry_points": [
+    "core",
+    "cli",
+    "gui"
+  ],
+  "icon": "🎙️",
+  "health_check": true,
+  "hot_pluggable": true,
+  "status": "stable",
+  "dependencies": [
+    "openai-whisper",
+    "torch",
+    "psutil"
+  ],
+  "categories": [
+    "ai-audio",
+    "speech-to-text",
+    "enterprise"
+  ],
+  "tags": [
+    "whisper",
+    "stt",
+    "transcribe",
+    "gpu",
+    "enterprise"
+  ],
+  "actions": [
+    {
+      "name": "stt.transcribe",
+      "description": "提交音频文件进行转写（可选择阻塞等待结果）",
+      "permission": "user"
+    },
+    {
+      "name": "stt.health",
+      "description": "查询 STT 模块健康状态与后端可用性",
+      "permission": "user"
+    }
+  ],
+  "events": [
+    {
+      "name": "stt.transcribe",
+      "description": "事件总线触发的转写请求（与动作同名）"
+    },
+    {
+      "name": "stt.health",
+      "description": "事件总线触发的健康查询"
+    },
+    {
+      "name": "module.loaded",
+      "description": "模块加载完成事件（系统广播）"
+    },
+    {
+      "name": "module.unloaded",
+      "description": "模块卸载事件（系统广播）"
+    }
+  ],
+  "config_schema": {
+    "model_size": {
+      "type": "string",
+      "default": "base",
+      "enum": [
+        "tiny",
+        "base",
+        "small",
+        "medium",
+        "large"
+      ],
+      "description": "Whisper 模型体量"
+    },
+    "device": {
+      "type": "string",
+      "default": null,
+      "description": "运行设备（null 自动选择 / 'cuda' / 'cpu' / 'cuda:0' 等）"
+    },
+    "language": {
+      "type": "string",
+      "default": "auto",
+      "description": "识别语言（auto 则自动识别）"
+    },
+    "compute_type": {
+      "type": "string",
+      "default": "float16",
+      "enum": [
+        "float32",
+        "float16"
+      ],
+      "description": "计算精度（GPU 建议 float16）"
+    },
+    "beam_size": {
+      "type": "integer",
+      "default": 5,
+      "minimum": 1,
+      "maximum": 10,
+      "description": "Beam Search 大小"
+    },
+    "temperature": {
+      "type": "number",
+      "default": 0.0,
+      "minimum": 0.0,
+      "maximum": 1.0,
+      "description": "采样温度"
+    },
+    "log_level": {
+      "type": "string",
+      "default": "INFO",
+      "enum": [
+        "DEBUG",
+        "INFO",
+        "WARNING",
+        "ERROR"
+      ],
+      "description": "日志级别"
+    },
+    "log_file": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null,
+      "description": "日志文件路径（为空仅控制台）"
+    },
+    "max_concurrent": {
+      "type": "integer",
+      "default": 2,
+      "minimum": 1,
+      "maximum": 8,
+      "description": "内部队列并发建议值"
+    },
+    "max_audio_duration": {
+      "type": "integer",
+      "default": 300,
+      "minimum": 1,
+      "maximum": 7200,
+      "description": "单文件最大时长（秒）"
+    },
+    "max_audio_size": {
+      "type": "integer",
+      "default": 52428800,
+      "minimum": 1048576,
+      "maximum": 524288000,
+      "description": "单文件最大体积（字节）"
+    },
+    "temp_dir": {
+      "type": "string",
+      "default": "/var/tmp/stt_processing",
+      "description": "内部处理临时目录"
+    },
+    "health_check_interval": {
+      "type": "integer",
+      "default": 60,
+      "minimum": 5,
+      "maximum": 600,
+      "description": "健康检查最小周期（秒）"
+    },
+    "auto_fallback": {
+      "type": "boolean",
+      "default": true,
+      "description": "模型加载失败是否自动降级"
+    },
+    "fallback_model": {
+      "type": "string",
+      "default": "base",
+      "enum": [
+        "tiny",
+        "base",
+        "small"
+      ],
+      "description": "自动降级目标模型"
+    },
+    "gpu_threshold": {
+      "type": "number",
+      "default": 0.85,
+      "minimum": 0.1,
+      "maximum": 0.99,
+      "description": "GPU 使用率报警阈值（0~1）"
+    },
+    "cpu_threshold": {
+      "type": "number",
+      "default": 0.8,
+      "minimum": 0.1,
+      "maximum": 0.99,
+      "description": "CPU 使用率报警阈值（0~1）"
+    },
+    "disk_threshold": {
+      "type": "number",
+      "default": 0.9,
+      "minimum": 0.1,
+      "maximum": 0.99,
+      "description": "磁盘使用率报警阈值（0~1）"
+    }
+  },
+  "upgrade_url": "https://github.com/sanhuajuding/stt_module/releases/latest",
+  "market_compatible": true,
+  "is_entry": true
+}

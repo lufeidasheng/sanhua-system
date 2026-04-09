@@ -1,0 +1,28 @@
+import os
+
+def get_file_sizes(directory):
+    # 获取目录下所有文件的大小
+    file_sizes = {}
+    for root, dirs, files in os.walk(directory):
+        for file in files:
+            file_path = os.path.join(root, file)
+            
+            try:
+                # 检查文件是否为常规文件（而不是设备文件、符号链接等）
+                if os.path.isfile(file_path):
+                    file_size = os.path.getsize(file_path)
+                    file_sizes[file_path] = file_size
+            except OSError as e:
+                # 处理无法获取文件大小的异常（例如设备文件）
+                print(f"Cannot access file {file_path}: {e}")
+    
+    return file_sizes
+
+def print_file_sizes(file_sizes):
+    for file_path, size in file_sizes.items():
+        print(f"File: {file_path}, Size: {size / (1024 * 1024):.2f} MB")
+
+# 调用函数
+directory = '/'  # 根目录
+file_sizes = get_file_sizes(directory)
+print_file_sizes(file_sizes)

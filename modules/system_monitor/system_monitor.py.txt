@@ -1,0 +1,380 @@
+import os
+"""
+system_monitor.py - 企业级系统监控模块
+
+提供实时系统资源监控（CPU/内存/磁盘/网络/温度等）和智能告警功能
+符合企业级部署标准：可配置阈值、历史数据追踪、安全审计、热插拔支持
+"""
+
+import time
+import logging
+import psutil
+import threading
+import json
+from datetime import datetime, timedelta
+from collections import deque
+from typing import Dict, Any, Optional, List
+
+# 企业级结构化日志配置
+logger = logging.getLogger('SystemMonitor')
+logger.setLevel(logging.INFO)
+
+# 监控配置常量 (可通过环境变量覆盖)
+MONITOR_INTERVAL = int(os.getenv('MONITOR_INTERVAL', '10'))  # 监控间隔(秒)
+HISTORY_WINDOW = int(os.getenv('HISTORY_WINDOW', '3600'))  # 历史数据窗口(秒)
+MAX_INACTIVE_TIME = int(os.getenv('MAX_INACTIVE_TIME', '7200'))  # 最大无活动时间(秒)
+
+# 告警阈值配置
+ALERT_THRESHOLDS = {
+    'cpu': float(os.getenv('CPU_ALERT_THRESHOLD', '85.0')),
+    'memory': float(os.getenv('MEMORY_ALERT_THRESHOLD', '90.0')),
+    'disk': float(os.getenv('DISK_ALERT_THRESHOLD', '90.0')),
+    'temp': float(os.getenv('TEMP_ALERT_THRESHOLD', '80.0')),
+    'network_drop': float(os.getenv('NET_DROP_THRESHOLD', '10.0'))  # 丢包率百分比
+}
+
+class SystemMonitor:
+    """企业级系统监控引擎"""
+    def __init__(self, core, interval=MONITOR_INTERVAL):
+        self.core = core
+        self.interval = interval
+        self.running = True
+        
+        # 历史数据存储 (时间序列)
+        self.history = {
+            'cpu': deque(maxlen=HISTORY_WINDOW // MONITOR_INTERVAL),
+            'memory': deque(maxlen=HISTORY_WINDOW // MONITOR_INTERVAL),
+            'disk': deque(maxlen=HISTORY_WINDOW // MONITOR_INTERVAL),
+            'network': deque(maxlen=HISTORY_WINDOW // MONITOR_INTERVAL),
+            'temperature': deque(maxlen=HISTORY_WINDOW // MONITOR_INTERVAL),
+            'timestamps': deque(maxlen=HISTORY_WINDOW // MONITOR_INTERVAL)
+        }
+        
+        # 告警状态跟踪
+        self.alerts = {
+            'high_cpu': {'active': False, 'since': None},
+            'high_memory': {'active': False, 'since': None},
+            'high_disk': {'active': False, 'since': None},
+            'high_temp': {'active': False, 'since': None},
+            'network_issues': {'active': False, 'since': None}
+        }
+        
+        # 网络基准线 (用于异常检测)
+        self.last_net_io = psutil.net_io_counters()
+        
+        # 线程相关，确保外部引用的名字存在
+        self.monitor_thread = threading.Thread(target=self.monitoring_loop, daemon=True)
+        self.system_monitor_loop = self.monitor_thread  # 兼容旧代码中引用的属性名
+        
+        logger.info(f"SystemMonitor initialized with interval={self.interval}s")
+        """获取全面系统指标"""
+        try:
+            # CPU 指标
+            cpu_percent = psutil.cpu_percent(interval=0.5)
+            cpu_freq = psutil.cpu_freq().current if hasattr(psutil, 'cpu_freq') and psutil.cpu_freq() else 0
+            cpu_load = [x / psutil.cpu_count() * 100 for x in psutil.getloadavg()]
+            
+            # 内存指标
+            mem = psutil.virtual_memory()
+            swap = psutil.swap_memory()
+            
+            # 磁盘指标
+            disk_usage = psutil.disk_usage('/').percent
+            disk_io = psutil.disk_io_counters()
+            
+            # 网络指标
+            net_io = psutil.net_io_counters()
+            net_delta = {
+                'bytes_sent': net_io.bytes_sent - self.last_net_io.bytes_sent,
+                'bytes_recv': net_io.bytes_recv - self.last_net_io.bytes_recv,
+                'drop_in': net_io.dropin - self.last_net_io.dropin,
+                'drop_out': net_io.dropout - self.last_net_io.dropout
+            }
+            self.last_net_io = net_io
+            
+            # 温度指标 (需要lm-sensors)
+            temps = {}
+            try:
+                if hasattr(psutil, 'sensors_temperatures'):
+                    temps_raw = psutil.sensors_temperatures()
+                    for name, entries in temps_raw.items():
+                        if entries:
+                            temps[name] = entries[0].current
+            except Exception as temp_err:
+                logger.warning("Temperature monitoring unavailable: %s", temp_err)
+            
+            return {
+                'timestamp': time.time(),
+                'cpu': {
+                    'percent': cpu_percent,
+                    'freq_mhz': cpu_freq,
+                    'load_1m': cpu_load[0],
+                    'load_5m': cpu_load[1],
+                    'load_15m': cpu_load[2]
+                },
+                'memory': {
+                    'percent': mem.percent,
+                    'used_gb': mem.used / (1024 ** 3),
+                    'available_gb': mem.available / (1024 ** 3)
+                },
+                'swap': {
+                    'percent': swap.percent,
+                    'used_gb': swap.used / (1024 ** 3)
+                },
+                'disk': {
+                    'usage_percent': disk_usage,
+                    'read_mb': disk_io.read_bytes / (1024 ** 2),
+                    'write_mb': disk_io.write_bytes / (1024 ** 2)
+                },
+                'network': net_delta,
+                'temperature': temps
+            }
+        except Exception as e:
+            logger.error("Failed to collect system stats: %s", e)
+            return {}
+
+    def detect_anomalies(self, stats: Dict[str, Any]) -> List[str]:
+        """检测系统异常并返回告警列表"""
+        alerts = []
+        now = time.time()
+        
+        # CPU 使用率告警
+        if stats.get('cpu', {}).get('percent', 0) > ALERT_THRESHOLDS['cpu']:
+            if not self.alerts['high_cpu']['active']:
+                self.alerts['high_cpu'] = {'active': True, 'since': now}
+                alerts.append(f"⚠️ 高CPU使用率: {stats['cpu']['percent']}%")
+        else:
+            self.alerts['high_cpu']['active'] = False
+        
+        # 内存使用率告警
+        if stats.get('memory', {}).get('percent', 0) > ALERT_THRESHOLDS['memory']:
+            if not self.alerts['high_memory']['active']:
+                self.alerts['high_memory'] = {'active': True, 'since': now}
+                alerts.append(f"⚠️ 高内存使用率: {stats['memory']['percent']}%")
+        else:
+            self.alerts['high_memory']['active'] = False
+        
+        # 磁盘使用率告警
+        if stats.get('disk', {}).get('usage_percent', 0) > ALERT_THRESHOLDS['disk']:
+            if not self.alerts['high_disk']['active']:
+                self.alerts['high_disk'] = {'active': True, 'since': now}
+                alerts.append(f"⚠️ 高磁盘使用率: {stats['disk']['usage_percent']}%")
+        else:
+            self.alerts['high_disk']['active'] = False
+        
+        # 温度告警
+        high_temp_triggered = False
+        for sensor, temp in stats.get('temperature', {}).items():
+            if temp > ALERT_THRESHOLDS['temp']:
+                if not self.alerts['high_temp']['active']:
+                    self.alerts['high_temp'] = {'active': True, 'since': now}
+                    alerts.append(f"⚠️ 高温度警告: {sensor}={temp}°C")
+                high_temp_triggered = True
+                break
+        if not high_temp_triggered:
+            self.alerts['high_temp']['active'] = False
+        
+        # 网络丢包告警
+        net_stats = stats.get('network', {})
+        total_bytes = net_stats.get('bytes_sent', 0) + net_stats.get('bytes_recv', 0)
+        total_packets = max(1, total_bytes / 1500)  # 估算包数
+        drop_rate = ((net_stats.get('drop_in', 0) + net_stats.get('drop_out', 0)) / total_packets) * 100
+        
+        if drop_rate > ALERT_THRESHOLDS['network_drop']:
+            if not self.alerts['network_issues']['active']:
+                self.alerts['network_issues'] = {'active': True, 'since': now}
+                alerts.append(f"⚠️ 网络丢包率过高: {drop_rate:.2f}%")
+        else:
+            self.alerts['network_issues']['active'] = False
+        
+        return alerts
+
+    def store_history(self, stats: Dict[str, Any]):
+        """存储历史监控数据"""
+        ts = stats.get('timestamp', time.time())
+        self.history['timestamps'].append(ts)
+        self.history['cpu'].append(stats.get('cpu', {}).get('percent', 0))
+        self.history['memory'].append(stats.get('memory', {}).get('percent', 0))
+        self.history['disk'].append(stats.get('disk', {}).get('usage_percent', 0))
+        
+        # 网络使用率 (MB)
+        net_bytes = stats.get('network', {}).get('bytes_sent', 0) + stats.get('network', {}).get('bytes_recv', 0)
+        net_usage = net_bytes / (1024 ** 2)
+        self.history['network'].append(net_usage)
+        
+        # 平均温度
+        temps = stats.get('temperature', {})
+        avg_temp = sum(temps.values()) / len(temps) if temps else 0
+        self.history['temperature'].append(avg_temp)
+
+    def monitoring_loop(self):
+        """主监控循环"""
+        logger.info("Starting system monitoring loop")
+        last_log_time = 0
+        
+        while self.running:
+            try:
+                # 检查系统活动状态
+                if hasattr(self.core, 'last_active') and (time.time() - self.core.last_active > MAX_INACTIVE_TIME):
+                    logger.warning("系统长时间无活动，触发自动关闭")
+                    if hasattr(self.core, 'shutdown'):
+                        self.core.shutdown()
+                    break
+                
+                # 收集系统指标
+                stats = self.get_comprehensive_stats()
+                if not stats:
+                    time.sleep(MONITOR_INTERVAL)
+                    continue
+                
+                # 存储历史数据
+                self.store_history(stats)
+                
+                # 检测并处理异常
+                alerts = self.detect_anomalies(stats)
+                for alert in alerts:
+                    if hasattr(self.core, 'context_manager') and hasattr(self.core.context_manager, 'add_context'):
+                        self.core.context_manager.add_context(alert)
+                    logger.warning(alert)
+                
+                # 周期性日志记录
+                now = time.time()
+                if now - last_log_time >= 60:
+                    logger.info(
+                        "系统状态: CPU %.1f%%, 内存 %.1f%%, 磁盘 %.1f%%, 温度 %.1f°C",
+                        stats['cpu']['percent'], stats['memory']['percent'],
+                        stats['disk']['usage_percent'],
+                        max(stats['temperature'].values()) if stats['temperature'] else 0
+                    )
+                    last_log_time = now
+                
+                # 等待下一个监控周期
+                for _ in range(MONITOR_INTERVAL):
+                    if not self.running:
+                        return
+                    time.sleep(1)
+                        
+            except Exception as e:
+                logger.exception("监控循环异常: %s", e)
+                time.sleep(10)
+
+    def start(self):
+        """启动监控线程"""
+        if not self.monitor_thread or not self.monitor_thread.is_alive():
+            self.running = True
+            self.monitor_thread = threading.Thread(
+                target=self.monitoring_loop, 
+                name="SystemMonitor",
+                daemon=True
+            )
+            self.monitor_thread.start()
+            logger.info("系统监控已启动")
+
+    def stop(self):
+        """停止监控线程"""
+        self.running = False
+        if self.monitor_thread and self.monitor_thread.is_alive():
+            self.monitor_thread.join(timeout=5)
+            logger.info("系统监控已停止")
+
+    def get_current_status(self) -> Dict[str, Any]:
+        """获取当前系统状态摘要"""
+        stats = self.get_comprehensive_stats()
+        return {
+            'status': 'ok' if not self.detect_anomalies(stats) else 'warning',
+            'metrics': stats,
+            'active_alerts': [k for k, v in self.alerts.items() if v['active']]
+        }
+# ================== 动作处理函数 ==================
+def get_system_status_action(core, params: Dict[str, Any]) -> str:
+    """获取当前系统状态摘要"""
+    monitor = core.get_module('system_monitor')
+    if not monitor:
+        return "系统监控模块未加载"
+    
+    status = monitor.get_current_status()
+    
+    cpu = status['metrics']['cpu']['percent']
+    mem = status['metrics']['memory']['percent']
+    disk = status['metrics']['disk']['usage_percent']
+    temps = status['metrics']['temperature']
+    max_temp = max(temps.values()) if temps else 0
+    
+    report = [
+        f"系统状态: {'⚠️ 警告' if status['active_alerts'] else '✅ 正常'}",
+        f"CPU使用率: {cpu:.1f}%",
+        f"内存使用率: {mem:.1f}%",
+        f"磁盘使用率: {disk:.1f}%",
+        f"最高温度: {max_temp:.1f}°C"
+    ]
+    
+    if status['active_alerts']:
+        report.append("\n活动告警:")
+        alert_map = {
+            'high_cpu': '高CPU使用率',
+            'high_memory': '高内存使用率',
+            'high_disk': '高磁盘使用率',
+            'high_temp': '高温警告',
+            'network_issues': '网络问题'
+        }
+        for alert in status['active_alerts']:
+            report.append(f" - {alert_map.get(alert, alert)}")
+    
+    return "\n".join(report)
+
+
+def get_system_metrics_action(core, params: Dict[str, Any]) -> Dict[str, Any]:
+    """获取详细系统指标 (JSON格式)"""
+    monitor = core.get_module('system_monitor')
+    if not monitor:
+        return {"error": "系统监控模块未加载"}
+    
+    return monitor.get_current_status()
+
+
+def register_actions(dispatcher):
+    """注册监控模块动作"""
+    dispatcher.register_action(
+        "get_system_status", 
+        get_system_status_action,
+        module_name="system.monitor",
+        description="获取当前系统状态摘要"
+    )
+    dispatcher.register_action(
+        "get_system_metrics", 
+        get_system_metrics_action,
+        module_name="system.monitor",
+        description="获取详细系统指标(JSON格式)"
+    )
+
+
+# ================== 模块生命周期管理 ==================
+def init_module(core):
+    """模块初始化函数"""
+    monitor = SystemMonitor(core)
+    core.register_module('system_monitor', monitor)
+    monitor.start()
+    return monitor
+
+
+def shutdown_module(core):
+    """模块关闭函数"""
+    monitor = core.get_module('system_monitor')
+    if monitor:
+        monitor.stop()
+        core.unregister_module('system_monitor')
+        logger.info("系统监控模块已关闭")
+
+
+# 模块元数据
+MODULE_METADATA = {
+    "name": "System Monitor",
+    "version": "2.0.0",
+    "description": "企业级系统资源监控与告警模块",
+    "init": init_module,
+    "shutdown": shutdown_module,
+    "actions": [
+        {"name": "get_system_status", "description": "获取系统状态摘要"},
+        {"name": "get_system_metrics", "description": "获取详细系统指标(JSON)"}
+    ]
+}

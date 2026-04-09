@@ -1,0 +1,68 @@
+# module.py
+
+from core.core2_0.sanhuatongyu.module.base import BaseModule
+from .audio_capture import initialize, cleanup, register_actions
+from core.core2_0.logger import TraceLogger
+
+logger = TraceLogger("audio_capture_module")
+
+class AudioCaptureModule(BaseModule):
+    def preload(self):
+        """
+        预加载阶段：用于预先准备资源，
+        例如读取配置、初始化内部数据结构等
+        """
+        logger.info("audio_capture_preload_start")
+        # 这里可做轻量级初始化
+        # 例如加载配置，预热资源等
+        logger.info("audio_capture_preload_complete")
+
+    def setup(self):
+        """
+        设置阶段：绑定动作注册器，订阅事件等，
+        一般注册动作与事件监听
+        """
+        logger.info("audio_capture_setup_start")
+        # 通过模块管理器的动作分发器注册动作
+        if self.context and self.context.module_manager and hasattr(self.context.module_manager, "dispatcher"):
+            dispatcher = self.context.module_manager.dispatcher
+            register_actions(dispatcher)
+            logger.info("audio_capture_actions_registered")
+        else:
+            logger.warning("module_manager或dispatcher未找到，动作注册失败")
+        logger.info("audio_capture_setup_complete")
+
+    def start(self):
+        """
+        启动阶段：模块开始运行，如开启子进程、线程或其他服务
+        """
+        logger.info("audio_capture_starting")
+        result = initialize()
+        if not result:
+            logger.error("audio_capture_start_failed")
+        else:
+            logger.info("audio_capture_started")
+
+    def post_start(self):
+        """
+        启动后处理，可发送模块启动完成事件等
+        """
+        logger.info("audio_capture_post_start")
+
+    def stop(self):
+        """
+        停止阶段，停止子进程、线程或释放运行资源
+        """
+        logger.info("audio_capture_stopping")
+        success = cleanup()
+        if success:
+            logger.info("audio_capture_stopped")
+        else:
+            logger.error("audio_capture_stop_failed")
+
+    def on_shutdown(self):
+        """
+        模块系统关闭清理阶段，确保资源彻底释放
+        """
+        logger.info("audio_capture_on_shutdown")
+        cleanup()

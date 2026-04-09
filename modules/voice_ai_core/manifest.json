@@ -1,0 +1,139 @@
+{
+  "name": "voice_ai_core",
+  "version": "1.0.0",
+  "title": "三花聚顶 · voice_ai_core（企业版语音核心）",
+  "author": "三花聚顶开发团队",
+  "author_contact": "support@sanhuajuding.com",
+  "description": "语音核心模块：采集/唤醒/转写的对接层。按需加载依赖，兼容热插拔与动作调度。",
+  "license": "MIT",
+  "repository": "https://github.com/sanhuajuding/voice_ai_core",
+  "entry": "module.py",
+  "entry_class": "modules.voice_ai_core.module.VoiceAICoreModule",
+  "enabled": true,
+  "entry_points": [
+    "core",
+    "gui"
+  ],
+  "icon": "🎙️",
+  "health_check": true,
+  "hot_pluggable": true,
+  "singleton": true,
+  "status": "stable",
+  "categories": [
+    "audio",
+    "stt",
+    "agent",
+    "enterprise"
+  ],
+  "tags": [
+    "语音采集",
+    "唤醒词",
+    "Whisper",
+    "GPU/CPU自适应",
+    "热插拔"
+  ],
+  "dependencies": [],
+  "actions": [
+    {
+      "name": "voice_ai.start",
+      "description": "启动语音核心（采集+唤醒）",
+      "permission": "user",
+      "aliases": [
+        "启动语音核心",
+        "启动语音",
+        "启动麦克风"
+      ]
+    },
+    {
+      "name": "voice_ai.stop",
+      "description": "停止语音核心",
+      "permission": "user",
+      "aliases": [
+        "停止语音核心",
+        "停止语音",
+        "停止麦克风"
+      ]
+    },
+    {
+      "name": "voice_ai.status",
+      "description": "查看语音核心状态",
+      "permission": "user",
+      "aliases": [
+        "语音状态",
+        "麦克风状态"
+      ]
+    },
+    {
+      "name": "voice_ai.download_model",
+      "description": "下载 Whisper 模型（本地保存）",
+      "permission": "user",
+      "aliases": [
+        "下载语音模型",
+        "下载whisper模型"
+      ]
+    },
+    {
+      "name": "voice_ai.transcribe",
+      "description": "对给定 WAV 文件进行离线转写",
+      "permission": "user",
+      "aliases": [
+        "离线转写",
+        "语音转文字"
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "voice_ai.wake",
+      "description": "检测到唤醒词事件"
+    }
+  ],
+  "config_schema": {
+    "models_dir": {
+      "type": "string",
+      "default": "~/.local/share/voice_ai_core/models",
+      "description": "Whisper .pt 模型存放目录（本地优先）"
+    },
+    "model_name": {
+      "type": "string",
+      "default": "base",
+      "description": "Whisper 模型名（tiny/base/small/…）"
+    },
+    "whisper_device": {
+      "type": "string",
+      "default": "auto",
+      "description": "auto/cpu/cuda"
+    },
+    "audio": {
+      "type": "object",
+      "default": {
+        "rate": 16000,
+        "channels": 1,
+        "chunk": 1024,
+        "format": "paInt16",
+        "silence_threshold": 800,
+        "buffer_seconds": 1.5
+      }
+    },
+    "wakeword": {
+      "type": "object",
+      "default": {
+        "amp_threshold": 1200,
+        "energy_threshold": 0.45,
+        "consecutive_frames": 5,
+        "cooldown": 1.5,
+        "post_record_seconds": 3.0
+      }
+    },
+    "heartbeat": {
+      "type": "object",
+      "default": {
+        "interval": 5.0,
+        "timeout": 15.0
+      }
+    }
+  },
+  "market_compatible": true,
+  "upgrade_url": "https://github.com/sanhuajuding/voice_ai_core/releases/latest",
+  "is_entry": true
+}

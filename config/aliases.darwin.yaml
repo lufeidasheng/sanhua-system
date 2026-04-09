@@ -1,0 +1,188 @@
+- name: 音乐播放
+  keywords:
+  - 播放音乐
+  - 来点音乐
+  - 放歌
+  - 音乐时间
+  - 来首歌
+  - 来一首歌
+  - 来首音乐
+  - 放一首歌
+  function: play_music
+- name: 音乐停止
+  keywords:
+  - 停止播放
+  - 停止音乐
+  function: stop_music
+- name: 音乐暂停
+  keywords:
+  - 暂停播放
+  - 暂停音乐
+  function: pause_music
+- name: 下一首
+  keywords:
+  - 下一首
+  - 下一曲
+  - 跳过歌曲
+  function: next_song
+- name: 上一首
+  keywords:
+  - 上一首
+  - 上一曲
+  - 回到上一首
+  function: previous_song
+- name: 单曲循环开
+  keywords:
+  - 开启单曲循环
+  - 单曲循环
+  function: loop_one_on
+- name: 单曲循环关
+  keywords:
+  - 关闭单曲循环
+  function: loop_one_off
+- name: 视频播放
+  keywords:
+  - 播放视频
+  - 打开视频文件
+  - 打开电影
+  function: play_video_file
+- name: 查看记忆
+  keywords:
+  - 查看记忆
+  - 回顾记忆
+  function: view_memory
+- name: 重启系统
+  keywords:
+  - 重启系统
+  - 重新启动
+  function: reboot_system
+- name: 关机
+  keywords:
+  - 关机
+  - 关闭电脑
+  - 我要关机
+  function: shutdown
+- name: 打开蓝牙
+  keywords:
+  - 打开蓝牙
+  - 启动蓝牙
+  function: enable_bluetooth
+- name: 关闭蓝牙
+  keywords:
+  - 关闭蓝牙
+  - 停止蓝牙
+  function: disable_bluetooth
+- name: 连接耳机
+  keywords:
+  - 连接耳机
+  - 连接战术耳机
+  - 连接战术耳机max
+  function: connect_headset
+- name: 音量加
+  keywords:
+  - 音量加
+  - 调大音量
+  - 声音大一点
+  function: volume_up
+- name: 音量减
+  keywords:
+  - 音量减
+  - 调小音量
+  - 声音小一点
+  function: volume_down
+- name: 静音
+  keywords:
+  - 静音
+  function: mute
+- name: 解除静音
+  keywords:
+  - 解除静音
+  function: unmute
+- name: wifi开
+  keywords:
+  - 开启WiFi
+  - 连接无线
+  function: enable_wifi
+- name: wifi关
+  keywords:
+  - 关闭WiFi
+  - 断开网络
+  function: disable_wifi
+- name: 切换wifi
+  keywords:
+  - 切换WiFi
+  - 连接网络
+  function: switch_wifi
+- name: 屏幕亮度加
+  keywords:
+  - 调高亮度
+  - 屏幕亮一点
+  function: brightness_up
+- name: 屏幕亮度减
+  keywords:
+  - 调低亮度
+  - 屏幕暗一点
+  function: brightness_down
+- name: 锁屏
+  keywords:
+  - 锁屏
+  function: lock_screen
+- name: 解锁
+  keywords:
+  - 解锁
+  function: unlock_screen
+- name: 截屏
+  keywords:
+  - 截屏
+  function: screenshot
+- name: 关闭助手
+  keywords:
+  - 关闭助手
+  - 退出
+  function: shutdown_assistant
+- name: 抖音
+  keywords:
+  - 打开抖音
+  - 刷抖音
+  - 看抖音
+  - 启动抖音
+  - 抖音
+  function: open_douyin
+- name: DeepSeek
+  keywords:
+  - 打开deepseek
+  - 大模型
+  - deepseek
+  - 聊大模型
+  - 智能助手
+  - AI助手
+  - AI对话
+  - 叫AI助手
+  - 问AI
+  - 召唤大模型
+  - 呼叫智能助手
+  function: open_deepseek
+- name: 微信
+  keywords:
+  - 打开微信
+  - 微信
+  function: open_wechat_web
+- name: B站
+  keywords:
+  - 启动B站
+  - 看B站
+  function: open_bilibili_web
+- name: QQ
+  keywords:
+  - 打开QQ
+  - QQ
+  function: open_qq_web
+- name: 浏览器
+  keywords:
+  - 打开浏览器
+  - 启动浏览器
+  function: open_browser
+- name: 文件管理器
+  keywords:
+  - 打开文件管理器
+  function: open_file_manager

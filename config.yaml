@@ -1,0 +1,22 @@
+# config.yaml
+
+system:
+  bluetooth:
+    enabled: false
+
+music:
+  local_music_path: "/home/lufei/音乐"
+
+logging:
+  level: DEBUG
+  gui_entry:
+  security_policies:
+    mfa_required: true
+    session_timeout: 3600  # 1小时
+    required_roles: ["admin", "operator"]
+  
+  metrics_endpoint: "https://metrics.your-company.com/api/v1"
+  
+  voice:
+    simulate_input: true  # 开发环境可启用
+    listen_timeout: 30    # 超时时间(秒)

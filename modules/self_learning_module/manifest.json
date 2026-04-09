@@ -1,0 +1,127 @@
+{
+  "name": "self_learning_module",
+  "version": "2.2.0",
+  "title": "三花聚顶 · 自学习模块（Fedora优化增强版）",
+  "author": "三花聚顶开发团队",
+  "author_contact": "support@sanhuajuding.com",
+  "description": "基于滑动窗口与反馈的自调参模块，支持Fedora性能监控、线程安全、事件处理与配置校验。",
+  "license": "MIT",
+  "repository": "https://github.com/sanhuajuding/self_learning_module",
+  "entry": "module.py",
+  "entry_class": "modules.self_learning_module.module.SelfLearningModule",
+  "enabled": true,
+  "entry_points": [
+    "core",
+    "gui"
+  ],
+  "icon": "🧠",
+  "health_check": true,
+  "hot_pluggable": true,
+  "singleton": true,
+  "status": "stable",
+  "categories": [
+    "ai-assist",
+    "optimization",
+    "telemetry"
+  ],
+  "tags": [
+    "self-learning",
+    "feedback",
+    "fedora",
+    "metrics",
+    "adaptive"
+  ],
+  "dependencies": [
+    "psutil"
+  ],
+  "actions": [
+    {
+      "name": "query_status",
+      "description": "查询自学习状态快照",
+      "permission": "user",
+      "aliases": [
+        "查询学习状态",
+        "学习状态",
+        "学习概览"
+      ]
+    },
+    {
+      "name": "reset_learning",
+      "description": "重置学习状态（不改动配置）",
+      "permission": "admin",
+      "aliases": [
+        "重置学习",
+        "清空学习数据"
+      ]
+    },
+    {
+      "name": "get_kernel_params",
+      "description": "获取当前内核参数",
+      "permission": "user",
+      "aliases": [
+        "获取学习参数",
+        "查看学习参数"
+      ]
+    },
+    {
+      "name": "update_learning_config",
+      "description": "更新自学习配置",
+      "permission": "admin",
+      "aliases": [
+        "更新学习配置",
+        "调整学习参数"
+      ]
+    },
+    {
+      "name": "get_recent_history",
+      "description": "查看最近任务历史",
+      "permission": "user",
+      "aliases": [
+        "学习历史",
+        "最近学习记录"
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "task_completed",
+      "description": "单个任务完成事件（成功/耗时）"
+    },
+    {
+      "name": "system_feedback",
+      "description": "系统/用户反馈事件（评分/错误报告）"
+    },
+    {
+      "name": "performance_alert",
+      "description": "性能预警事件（高CPU等）"
+    }
+  ],
+  "config_schema": {
+    "response_time_threshold": {
+      "type": "number",
+      "default": 1.0
+    },
+    "adjustment_step": {
+      "type": "number",
+      "default": 0.05
+    },
+    "success_rate_target": {
+      "type": "number",
+      "default": 0.95
+    },
+    "history_size": {
+      "type": "integer",
+      "default": 1000
+    },
+    "window_size": {
+      "type": "integer",
+      "default": 100
+    },
+    "min_adjust_interval": {
+      "type": "integer",
+      "default": 15
+    }
+  },
+  "market_compatible": true,
+  "is_entry": true
+}

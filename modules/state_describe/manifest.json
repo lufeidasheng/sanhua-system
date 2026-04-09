@@ -1,0 +1,25 @@
+{
+  "name": "state_describe",
+  "version": "1.0.0",
+  "title": "系统自我描述模块",
+  "author": "Peng",
+  "description": "用于让模型感知当前系统状态和自身位置。",
+  "license": "MIT",
+  "entry": "module.py",
+  "entry_class": "modules.state_describe.module.OfficialStateDescribeModule",
+  "enabled": true,
+  "status": "active",
+  "actions": [
+    {
+      "name": "describe_state",
+      "description": "返回三花聚顶当前系统状态描述。",
+      "aliases": [
+        "系统状态",
+        "自我描述",
+        "state",
+        "status"
+      ]
+    }
+  ],
+  "market_compatible": true
+}

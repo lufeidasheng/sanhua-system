@@ -1,0 +1,79 @@
+{
+  "name": "code_executor",
+  "version": "1.0.0",
+  "author": "三花聚顶开发团队",
+  "author_contact": "support@sanhuajuding.com",
+  "description": "基于Fedora安全策略的Python代码执行模块，支持沙箱隔离、资源限制、代码安全校验、异步测试。",
+  "license": "MIT",
+  "repository": "https://github.com/sanhuajuding/code_executor",
+  "entry": "module.py",
+  "entry_class": "modules.code_executor.module.OfficialCodeExecutorModule",
+  "enabled": true,
+  "status": "active",
+  "categories": [
+    "sandbox",
+    "python",
+    "security",
+    "executor"
+  ],
+  "tags": [
+    "sandbox",
+    "resource-limit",
+    "fedora",
+    "code",
+    "executor"
+  ],
+  "dependencies": [],
+  "actions": [
+    {
+      "name": "code_executor.run_code",
+      "description": "安全执行Python代码块（Fedora沙箱）",
+      "permission": "user",
+      "parameters": [
+        {
+          "name": "code",
+          "type": "string",
+          "description": "要执行的Python代码"
+        },
+        {
+          "name": "timeout",
+          "type": "integer",
+          "description": "执行超时时间（秒）",
+          "optional": true
+        }
+      ],
+      "returns": {
+        "success": "boolean",
+        "output": "string",
+        "error": "string",
+        "execution_time": "number"
+      }
+    }
+  ],
+  "events": [
+    {
+      "name": "code_executor.executed",
+      "description": "每次代码块执行完毕后可发布事件"
+    }
+  ],
+  "config_schema": {
+    "timeout": {
+      "type": "integer",
+      "default": 10,
+      "description": "代码块默认最大执行时间（秒）",
+      "minimum": 1,
+      "maximum": 120
+    },
+    "max_output_length": {
+      "type": "integer",
+      "default": 5000,
+      "description": "输出截断的最大长度（字符）",
+      "minimum": 100,
+      "maximum": 100000
+    }
+  },
+  "market_compatible": false,
+  "visibility": "service",
+  "debug_only": false,
+  "is_entry": true
+}

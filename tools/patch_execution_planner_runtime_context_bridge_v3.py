@@ -1,0 +1,612 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+from __future__ import annotations
+
+import argparse
+import shutil
+from datetime import datetime
+from pathlib import Path
+
+NEW_CODE = r'''from __future__ import annotations
+
+import inspect
+import logging
+import subprocess
+import uuid
+from dataclasses import asdict, dataclass, field
+from typing import Any, Dict, List, Optional
+
+from core.core2_0.sanhuatongyu.decision_arbiter import ArbiterDecision
+from core.core2_0.sanhuatongyu.suggestion_interpreter import InterpretationResult, SuggestionItem
+
+log = logging.getLogger(__name__)
+
+
+# ============================================================
+# 数据模型
+# ============================================================
+
+@dataclass
+class PlanStep:
+    step_id: str
+    title: str
+    kind: str  # action / shell / manual / checkpoint
+    action_name: Optional[str] = None
+    params: Dict[str, Any] = field(default_factory=dict)
+    command: Optional[str] = None
+    manual_instruction: Optional[str] = None
+    depends_on: List[str] = field(default_factory=list)
+    status: str = "planned"
+    dry_run_note: str = ""
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class ExecutionPlan:
+    plan_id: str
+    summary: str
+    steps: List[PlanStep] = field(default_factory=list)
+    executable: bool = False
+    blocked_reasons: List[str] = field(default_factory=list)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "plan_id": self.plan_id,
+            "summary": self.summary,
+            "steps": [s.to_dict() for s in self.steps],
+            "executable": self.executable,
+            "blocked_reasons": self.blocked_reasons,
+        }
+
+
+@dataclass
+class ExecutionResult:
+    plan_id: str
+    mode: str  # dry_run / execute
+    step_results: List[Dict[str, Any]] = field(default_factory=list)
+    success: bool = False
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+# ============================================================
+# 规划器
+# ============================================================
+
+class ExecutionPlanner:
+    """
+    第一版目标：
+    1. 接 Arbiter 的通过结果
+    2. 生成统一的执行步骤
+    3. 支持 dry-run
+    4. 后续可接 dispatcher 真执行
+    """
+
+    def build_plan(
+        self,
+        interpretation: InterpretationResult,
+        decision: ArbiterDecision,
+        runtime_context: Optional[Dict[str, Any]] = None,
+    ) -> ExecutionPlan:
+        runtime_context = runtime_context or {}
+        plan = ExecutionPlan(
+            plan_id=f"plan-{uuid.uuid4().hex[:12]}",
+            summary="",
+            steps=[],
+            executable=False,
+            blocked_reasons=[],
+        )
+
+        if decision.overall_verdict == "reject":
+            plan.blocked_reasons.extend(decision.reasons or ["裁决结果为 reject"])
+            plan.summary = "裁决拒绝，未生成执行计划。"
+            return plan
+
+        if decision.review_items and not decision.approved_items:
+            plan.blocked_reasons.extend(decision.reasons or ["存在待复核建议"])
+            plan.summary = "仅存在待复核建议，生成人工审阅计划。"
+            plan.steps = self._build_review_steps(decision.review_items)
+            plan.executable = False
+            return plan
+
+        steps: List[PlanStep] = []
+
+        approved_steps = self._convert_items_to_steps(decision.approved_items)
+        steps.extend(approved_steps)
+
+        if decision.review_items:
+            steps.extend(self._build_review_steps(decision.review_items))
+            plan.blocked_reasons.append("部分建议需要人工确认，已附加 review 步骤")
+
+        plan.steps = steps
+        plan.executable = len(approved_steps) > 0
+        plan.summary = self._build_summary(plan)
+        return plan
+
+    # --------------------------------------------------------
+    # 执行
+    # --------------------------------------------------------
+
+    def execute(
+        self,
+        plan: ExecutionPlan,
+        dispatcher: Optional[Any] = None,
+        *,
+        dry_run: bool = True,
+        allow_shell: bool = False,
+        dispatch_context: Optional[Dict[str, Any]] = None,
+    ) -> ExecutionResult:
+        dispatch_context = dispatch_context or {}
+        result = ExecutionResult(plan_id=plan.plan_id, mode="dry_run" if dry_run else "execute")
+
+        if not plan.steps:
+            result.step_results.append(
+                {
+                    "status": "skipped",
+                    "reason": "空计划，无步骤可执行",
+                }
+            )
+            result.success = False
+            return result
+
+        all_ok = True
+
+        for step in plan.steps:
+            if dry_run:
+                result.step_results.append(
+                    {
+                        "step_id": step.step_id,
+                        "title": step.title,
+                        "kind": step.kind,
+                        "status": "dry_run",
+                        "note": step.dry_run_note or "dry-run 模式未真实执行",
+                    }
+                )
+                continue
+
+            if step.kind == "manual":
+                result.step_results.append(
+                    {
+                        "step_id": step.step_id,
+                        "title": step.title,
+                        "kind": step.kind,
+                        "status": "manual_required",
+                        "instruction": step.manual_instruction,
+                    }
+                )
+                continue
+
+            if step.kind == "action":
+                ok, payload = self._execute_action_step(step, dispatcher, dispatch_context)
+                result.step_results.append(payload)
+                all_ok = all_ok and ok
+                continue
+
+            if step.kind == "shell":
+                ok, payload = self._execute_shell_step(step, allow_shell=allow_shell)
+                result.step_results.append(payload)
+                all_ok = all_ok and ok
+                continue
+
+            result.step_results.append(
+                {
+                    "step_id": step.step_id,
+                    "title": step.title,
+                    "kind": step.kind,
+                    "status": "skipped",
+                    "reason": f"未知步骤类型: {step.kind}",
+                }
+            )
+            all_ok = False
+
+        result.success = all_ok
+        return result
+
+    # --------------------------------------------------------
+    # 步骤构建
+    # --------------------------------------------------------
+
+    def _convert_items_to_steps(self, items: List[SuggestionItem]) -> List[PlanStep]:
+        steps: List[PlanStep] = []
+        prev_step_id: Optional[str] = None
+
+        for idx, item in enumerate(items, start=1):
+            step_id = f"step-{idx:02d}"
+            depends_on = [prev_step_id] if prev_step_id else []
+
+            if item.kind == "action":
+                step = PlanStep(
+                    step_id=step_id,
+                    title=f"执行动作: {item.action_name or item.raw_text}",
+                    kind="action",
+                    action_name=item.action_name,
+                    params=item.params,
+                    depends_on=depends_on,
+                    dry_run_note=f"将调用 dispatcher action: {item.action_name}",
+                )
+            elif item.kind == "shell":
+                step = PlanStep(
+                    step_id=step_id,
+                    title="执行命令行建议",
+                    kind="shell",
+                    command=item.command or item.raw_text,
+                    params=item.params,
+                    depends_on=depends_on,
+                    dry_run_note=f"将执行 shell: {item.command or item.raw_text}",
+                )
+            else:
+                step = PlanStep(
+                    step_id=step_id,
+                    title="人工处理建议",
+                    kind="manual",
+                    manual_instruction=item.raw_text,
+                    depends_on=depends_on,
+                    dry_run_note="该步骤仅供人工执行",
+                )
+
+            steps.append(step)
+            prev_step_id = step_id
+
+        return steps
+
+    def _build_review_steps(self, items: List[SuggestionItem]) -> List[PlanStep]:
+        out: List[PlanStep] = []
+        for idx, item in enumerate(items, start=1):
+            out.append(
+                PlanStep(
+                    step_id=f"review-{idx:02d}",
+                    title="人工复核建议",
+                    kind="manual",
+                    manual_instruction=item.raw_text,
+                    dry_run_note="该建议需人工确认后再执行",
+                )
+            )
+        return out
+
+    def _build_summary(self, plan: ExecutionPlan) -> str:
+        if not plan.steps:
+            return "无可执行步骤。"
+        return " -> ".join([s.title for s in plan.steps])
+
+    # --------------------------------------------------------
+    # 真执行桥接
+    # --------------------------------------------------------
+
+    def _extract_context_payload(
+        self,
+        step: PlanStep,
+        dispatch_context: Dict[str, Any],
+    ) -> tuple[Dict[str, Any], Dict[str, Any]]:
+        """
+        返回:
+        - context_value: 给 action 的 context 参数
+        - local_params: 真实业务 kwargs
+
+        关键修复点：
+        1. 把 runtime_context 平铺到 action kwargs
+        2. 保留 context 这个专用入口
+        3. step.params 优先级高于 dispatch_context
+        """
+        raw_context = dict(dispatch_context or {})
+        step_params = dict(step.params or {})
+
+        # context 专门留给 action 的 context 参数
+        context_value = dict(raw_context)
+        if "context" in step_params and isinstance(step_params["context"], dict):
+            context_value.update(step_params["context"])
+
+        # 业务参数：dispatch_context 先铺底，step.params 再覆盖
+        local_params: Dict[str, Any] = {}
+        for k, v in raw_context.items():
+            if k == "context":
+                continue
+            local_params[k] = v
+
+        for k, v in step_params.items():
+            if k == "context":
+                continue
+            local_params[k] = v
+
+        return context_value, local_params
+
+    def _normalize_output_status(
+        self,
+        output: Any,
+    ) -> tuple[bool, Optional[str], str]:
+        """
+        统一动作语义：
+        - dict 且 ok=False -> failed
+        - 其他默认 ok
+        """
+        if isinstance(output, dict):
+            if output.get("ok") is False:
+                reason = (
+                    output.get("reason")
+                    or output.get("error")
+                    or "action_reported_failure"
+                )
+                return False, str(reason), "failed"
+            return True, None, "ok"
+        return True, None, "ok"
+
+    def _filter_kwargs_for_callable(
+        self,
+        fn: Any,
+        kwargs: Dict[str, Any],
+    ) -> tuple[Dict[str, Any], bool]:
+        """
+        按签名过滤 kwargs。
+        返回:
+        - filtered kwargs
+        - 是否支持 **kwargs
+        """
+        try:
+            sig = inspect.signature(fn)
+        except Exception:
+            return dict(kwargs), True
+
+        params = sig.parameters
+        accepts_var_kw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values())
+        if accepts_var_kw:
+            return dict(kwargs), True
+
+        accepted = {}
+        for name, value in kwargs.items():
+            if name in params:
+                accepted[name] = value
+        return accepted, False
+
+    def _execute_action_step(
+        self,
+        step: PlanStep,
+        dispatcher: Optional[Any],
+        dispatch_context: Dict[str, Any],
+    ) -> tuple[bool, Dict[str, Any]]:
+        if dispatcher is None:
+            return False, {
+                "step_id": step.step_id,
+                "title": step.title,
+                "kind": step.kind,
+                "status": "failed",
+                "reason": "未提供 dispatcher，无法执行 action 步骤",
+            }
+
+        action_name = step.action_name
+        tried: List[str] = []
+
+        def _try_call(obj: Any, method_name: str, *args, **kwargs):
+            if not hasattr(obj, method_name):
+                raise AttributeError(method_name)
+            fn = getattr(obj, method_name)
+            return fn(*args, **kwargs)
+
+        try:
+            context_value, local_params = self._extract_context_payload(step, dispatch_context)
+
+            # ----------------------------------------------------
+            # 第一优先级：直接 get_action(func) -> 智能调用
+            # ----------------------------------------------------
+            if hasattr(dispatcher, "get_action"):
+                tried.append("get_action")
+                meta = dispatcher.get_action(action_name)
+                if meta is not None:
+                    fn = getattr(meta, "func", None) or getattr(meta, "handler", None) or meta
+
+                    if callable(fn):
+                        filtered_kwargs, accepts_var_kw = self._filter_kwargs_for_callable(
+                            fn, local_params
+                        )
+
+                        def _invoke_callable(callable_obj: Any):
+                            last_type_error = None
+
+                            candidates = [
+                                ("callable(context=..., **kwargs)",
+                                 lambda: callable_obj(context=context_value, **filtered_kwargs)),
+                                ("callable(**kwargs)",
+                                 lambda: callable_obj(**filtered_kwargs)),
+                                ("callable(context, **kwargs)",
+                                 lambda: callable_obj(context_value, **filtered_kwargs)),
+                                ("callable(context=...)",
+                                 lambda: callable_obj(context=context_value)),
+                                ("callable(context)",
+                                 lambda: callable_obj(context_value)),
+                                ("callable()",
+                                 lambda: callable_obj()),
+                            ]
+
+                            for label, runner in candidates:
+                                try:
+                                    return runner(), label
+                                except TypeError as e:
+                                    last_type_error = e
+                                    continue
+
+                            if last_type_error is not None:
+                                raise last_type_error
+                            raise RuntimeError("callable invoke failed")
+
+                        output, invoke_mode = _invoke_callable(fn)
+                        ok, reason, final_status = self._normalize_output_status(output)
+
+                        payload = {
+                            "step_id": step.step_id,
+                            "title": step.title,
+                            "kind": step.kind,
+                            "status": final_status,
+                            "action_name": action_name,
+                            "output": output,
+                            "bridge_method": "get_action(func)",
+                            "invoke_mode": invoke_mode,
+                        }
+                        if reason:
+                            payload["reason"] = reason
+                        return ok, payload
+
+            # ----------------------------------------------------
+            # 第二优先级：dispatcher.execute(...)
+            # ----------------------------------------------------
+            if hasattr(dispatcher, "execute"):
+                tried.append("execute")
+                output = _try_call(dispatcher, "execute", action_name, **local_params)
+                ok, reason, final_status = self._normalize_output_status(output)
+
+                payload = {
+                    "step_id": step.step_id,
+                    "title": step.title,
+                    "kind": step.kind,
+                    "status": final_status,
+                    "action_name": action_name,
+                    "output": output,
+                    "bridge_method": "execute(action_name, **params)",
+                }
+                if reason:
+                    payload["reason"] = reason
+                return ok, payload
+
+            # ----------------------------------------------------
+            # 第三优先级：其它 action API
+            # ----------------------------------------------------
+            for method_name in (
+                "call_action",
+                "dispatch_action",
+                "execute_action",
+                "run_action",
+                "trigger_action",
+                "do_action",
+            ):
+                if hasattr(dispatcher, method_name):
+                    tried.append(method_name)
+                    output = _try_call(dispatcher, method_name, action_name, **local_params)
+                    ok, reason, final_status = self._normalize_output_status(output)
+
+                    payload = {
+                        "step_id": step.step_id,
+                        "title": step.title,
+                        "kind": step.kind,
+                        "status": final_status,
+                        "action_name": action_name,
+                        "output": output,
+                        "bridge_method": method_name,
+                    }
+                    if reason:
+                        payload["reason"] = reason
+                    return ok, payload
+
+            return False, {
+                "step_id": step.step_id,
+                "title": step.title,
+                "kind": step.kind,
+                "status": "failed",
+                "action_name": action_name,
+                "reason": "dispatcher 未匹配到可用执行接口",
+                "tried_methods": tried,
+                "dispatcher_type": str(type(dispatcher)),
+            }
+
+        except Exception as exc:
+            log.exception("执行 action 步骤失败: %s", step.action_name)
+            return False, {
+                "step_id": step.step_id,
+                "title": step.title,
+                "kind": step.kind,
+                "status": "failed",
+                "action_name": action_name,
+                "reason": str(exc),
+                "tried_methods": tried,
+                "dispatcher_type": str(type(dispatcher)),
+            }
+
+    def _execute_shell_step(self, step: PlanStep, allow_shell: bool) -> tuple[bool, Dict[str, Any]]:
+        if not allow_shell:
+            return False, {
+                "step_id": step.step_id,
+                "title": step.title,
+                "kind": step.kind,
+                "status": "blocked",
+                "reason": "当前执行器未放行 shell",
+            }
+
+        try:
+            proc = subprocess.run(
+                step.command,
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            ok = proc.returncode == 0
+            return ok, {
+                "step_id": step.step_id,
+                "title": step.title,
+                "kind": step.kind,
+                "status": "ok" if ok else "failed",
+                "command": step.command,
+                "returncode": proc.returncode,
+                "stdout": proc.stdout,
+                "stderr": proc.stderr,
+            }
+        except Exception as exc:
+            return False, {
+                "step_id": step.step_id,
+                "title": step.title,
+                "kind": step.kind,
+                "status": "failed",
+                "command": step.command,
+                "reason": str(exc),
+            }
+'''
+
+
+def backup_file(root: Path, file_path: Path) -> Path:
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_root = root / "audit_output" / "fix_backups" / ts
+    rel = file_path.relative_to(root)
+    backup_path = backup_root / rel
+    backup_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(file_path, backup_path)
+    return backup_path
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--root", required=True, help="项目根目录")
+    args = parser.parse_args()
+
+    root = Path(args.root).resolve()
+    target = root / "core" / "core2_0" / "sanhuatongyu" / "execution_planner.py"
+
+    print("=" * 72)
+    print("execution_planner runtime-context bridge v3 补丁开始")
+    print("=" * 72)
+
+    if not target.exists():
+        raise FileNotFoundError(f"未找到目标文件: {target}")
+
+    backup = backup_file(root, target)
+    print(f"[BACKUP ] {backup}")
+
+    target.write_text(NEW_CODE, encoding="utf-8")
+    print(f"[PATCHED] {target}")
+
+    print("=" * 72)
+    print("execution_planner runtime-context bridge v3 补丁完成")
+    print("=" * 72)
+    print("修复点：")
+    print(" - dispatch_context 自动桥接到 action kwargs")
+    print(" - context 保持独立传递")
+    print(" - step.params 优先覆盖 runtime_context")
+    print(" - 按 callable 签名过滤 kwargs")
+    print(" - dict 输出 ok=False 统一转 failed")
+    print("=" * 72)
+    print("下一步建议：")
+    print(f'  python3 "{root / "tools" / "test_code_inserter_preview_context_v2.py"}"')
+    print("=" * 72)
+
+
+if __name__ == "__main__":
+    main()

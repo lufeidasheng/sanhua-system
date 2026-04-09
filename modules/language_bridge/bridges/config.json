@@ -1,0 +1,16 @@
+{
+  "rust_example": {
+    "command": ["./rust_example"],
+    "requires": ["rust"],
+    "description": "Rust示例桥接器",
+    "sandbox": "auto",
+    "timeout": 8
+  },
+  "go_example": {
+    "command": ["./go_example"],
+    "requires": ["go"],
+    "description": "Go示例桥接器",
+    "timeout": 10,
+    "sanitize_pattern": "^[\\w\\s\\-.,:;!?]+$"
+  }
+}

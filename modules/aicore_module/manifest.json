@@ -1,0 +1,107 @@
+{
+  "name": "aicore_module",
+  "version": "1.2.0",
+  "author": "三花聚顶开发团队",
+  "author_contact": "support@sanhuajuding.com",
+  "description": "核心AICore模块，提供自然语言理解、命令映射、意图识别、动作分发，以及 AICore 内部对话服务与兜底能力。项目当前正式主聊天桥为 ai.chat；aicore.chat 用于内部/兼容/兜底接入，不作为默认正式主聊天桥。",
+  "license": "Apache-2.0",
+  "repository": "https://github.com/sanhuajuding/aicore_module",
+  "entry": "module.py",
+  "entry_class": "modules.aicore_module.module.AICoreModule",
+  "enabled": true,
+  "status": "active",
+  "categories": [
+    "core",
+    "ai",
+    "nlp",
+    "dispatcher",
+    "intents"
+  ],
+  "tags": [
+    "AI",
+    "assistant",
+    "自然语言",
+    "多轮对话",
+    "意图识别",
+    "动作分发",
+    "热插拔",
+    "事件驱动",
+    "internal-chat",
+    "fallback"
+  ],
+  "dependencies": [
+    "core.aicore.aicore",
+    "core.aicore.intent_action_generator",
+    "core.core2_0.sanhuatongyu.module.base",
+    "core.core2_0.sanhuatongyu.action_dispatcher"
+  ],
+  "actions": [
+    {
+      "name": "aicore.chat",
+      "display_name": "AICore 内部对话服务",
+      "description": "AICore 的内部/兼容/兜底对话动作。用于在正式主聊天桥 ai.chat 之外提供 AICore 内部服务接入与历史兼容，不作为默认正式主聊天桥。",
+      "permission": "user",
+      "parameters": [
+        {
+          "name": "query",
+          "type": "string",
+          "description": "用户自然语言输入或指令"
+        }
+      ],
+      "returns": {
+        "type": "string",
+        "description": "AICore 返回的响应文本；主要用于内部服务、兼容路径或兜底路径。"
+      },
+      "entrypoint": "AICoreModule.chat"
+    }
+  ],
+  "events": [
+    {
+      "name": "aicore.chat",
+      "description": "请求 AICore 内部/兼容对话服务（事件驱动）"
+    },
+    {
+      "name": "aicore.chat_response",
+      "description": "AICore 返回内部/兼容对话结果（事件回调）"
+    }
+  ],
+  "config_schema": {
+    "default_language": {
+      "type": "string",
+      "default": "zh_CN",
+      "description": "AI助手默认语言"
+    },
+    "llm_endpoint": {
+      "type": "string",
+      "default": "http://localhost:11434/api/generate",
+      "description": "用于LLM回退的推理服务地址"
+    }
+  },
+  "market_compatible": false,
+  "display_name": "三花聚顶 · AICore模块",
+  "visibility": "core",
+  "debug_only": false,
+  "hotplug": true,
+  "entrypoints": [
+    "preload",
+    "setup",
+    "start",
+    "stop",
+    "cleanup"
+  ],
+  "interfaces": [
+    "QuantumActionDispatcher",
+    "BaseModule",
+    "EventBus",
+    "AICore",
+    "ActionMapper",
+    "IntentRecognizer"
+  ],
+  "compatibility": [
+    "三花聚顶CLI旗舰入口",
+    "三花聚顶GUI旗舰入口",
+    "RemoteAPI/Web接口",
+    "事件驱动主控"
+  ],
+  "last_update": "2026-04-01T00:00:00+08:00"
+}

@@ -1,0 +1,67 @@
+{
+  "name": "format_manager",
+  "version": "1.0.2",
+  "title": "三花聚顶 · format_manager（统一格式化输出）",
+  "author": "三花聚顶开发团队",
+  "description": "统一格式化输出（代码/文本/表格/错误/文件），带安全清洗、日志与截断，并支持事件总线调用。",
+  "license": "MIT",
+  "entry": "module.py",
+  "entry_class": "modules.format_manager.module.FormatManagerModule",
+  "enabled": true,
+  "entry_points": [
+    "core",
+    "gui"
+  ],
+  "icon": "🧩",
+  "health_check": true,
+  "hot_pluggable": true,
+  "singleton": true,
+  "status": "stable",
+  "categories": [
+    "utility",
+    "formatting",
+    "text"
+  ],
+  "tags": [
+    "formatter",
+    "markdown",
+    "sanitizer",
+    "table",
+    "error-box",
+    "event-bus"
+  ],
+  "dependencies": [],
+  "actions": [
+    {
+      "name": "format_output",
+      "description": "格式化输出（代码/文本/表格/列表/其他）",
+      "permission": "user",
+      "aliases": [
+        "格式化输出",
+        "美化内容",
+        "排版内容"
+      ]
+    },
+    {
+      "name": "format_error",
+      "description": "格式化错误信息到装饰框",
+      "permission": "user",
+      "aliases": [
+        "格式化错误",
+        "显示错误"
+      ]
+    },
+    {
+      "name": "format_file",
+      "description": "读取并格式化文件内容为代码块",
+      "permission": "user",
+      "aliases": [
+        "格式化文件",
+        "查看文件内容"
+      ]
+    }
+  ],
+  "config_schema": {},
+  "market_compatible": true,
+  "is_entry": true
+}

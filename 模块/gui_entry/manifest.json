@@ -1,0 +1,22 @@
+{
+    "author": "Auto-Gen",
+    "config": {
+        "default_height": 600,
+        "default_width": 900,
+        "theme": "dark"
+    },
+    "created_at": "2025-07-12",
+    "dependencies": [],
+    "description": "图形界面入口模块 - 提供可视化控制和系统状态展示",
+    "enabled": true,
+    "entry": "__init__.py",
+    "entry_point": "gui_entry.py:main",
+    "entry_points": [
+        "gui"
+    ],
+    "id": "gui_entry",
+    "is_entry": true,
+    "name": "gui_entry",
+    "version": "1.0.0",
+    "visibility": "interface"
+}

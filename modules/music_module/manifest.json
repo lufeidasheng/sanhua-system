@@ -1,0 +1,81 @@
+{
+  "name": "music_module",
+  "version": "1.0.0",
+  "author": "三花聚顶开发团队",
+  "author_contact": "support@sanhuajuding.com",
+  "description": "本地音乐自动扫描与随机播放，支持后台播放、健康检测、事件驱动与模块热插拔，兼容 Fedora 优化。",
+  "license": "Apache-2.0",
+  "repository": "https://github.com/sanhuajuding/music_module",
+  "entry": "module.py",
+  "entry_class": "modules.music_module.module.MusicManager",
+  "enabled": true,
+  "status": "active",
+  "categories": [
+    "entertainment",
+    "audio",
+    "music"
+  ],
+  "tags": [
+    "music",
+    "player",
+    "fedora",
+    "audio",
+    "娱乐"
+  ],
+  "dependencies": [
+    "core.aicore.memory",
+    "core2_0.sanhuatongyu.action_dispatcher"
+  ],
+  "actions": [
+    {
+      "name": "play_music",
+      "display_name": "随机播放本地音乐",
+      "description": "自动扫描本地音乐并后台播放一首，支持事件和动作调用。",
+      "permission": "user",
+      "parameters": [],
+      "returns": {
+        "type": "string",
+        "description": "播放结果或提示信息"
+      },
+      "entrypoint": "MusicManager.play_music_action"
+    }
+  ],
+  "events": [
+    {
+      "name": "music.play",
+      "description": "触发本地音乐随机播放"
+    }
+  ],
+  "config_schema": {
+    "music_dir": {
+      "type": "string",
+      "default": "",
+      "description": "自定义音乐目录（如未设置则自动检测）"
+    }
+  },
+  "market_compatible": true,
+  "display_name": "三花聚顶音乐模块",
+  "visibility": "core",
+  "debug_only": false,
+  "entrypoints": [
+    "preload",
+    "setup",
+    "start",
+    "stop",
+    "cleanup"
+  ],
+  "compatibility": [
+    "三花聚顶CLI旗舰入口",
+    "三花聚顶GUI旗舰入口",
+    "API/Service/Web前端",
+    "事件驱动"
+  ],
+  "interfaces": [
+    "QuantumActionDispatcher",
+    "BaseModule",
+    "事件总线"
+  ],
+  "hotplug": true,
+  "last_update": "2025-08-06T18:20:00+08:00",
+  "is_entry": true
+}

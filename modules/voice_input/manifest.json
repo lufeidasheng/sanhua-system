@@ -1,0 +1,195 @@
+{
+  "name": "voice_input",
+  "version": "1.2.0",
+  "title": "三花聚顶 · voice_input 语音采集模块（平台稳定版）",
+  "author": "三花聚顶开发团队",
+  "author_contact": "support@sanhuajuding.com",
+  "description": "基于 PyAudio 的实时语音采集模块，支持降噪、归一化、静音检测自动停止，支持动作与事件调用，适配企业级模块管理器，默认用户目录存储免权限。",
+  "license": "MIT",
+  "repository": "https://github.com/sanhuajuding/voice_input",
+  "entry": "module.py",
+  "entry_class": "modules.voice_input.module.VoiceInputModule",
+  "enabled": true,
+  "entry_points": [
+    "core",
+    "gui"
+  ],
+  "icon": "🎤",
+  "health_check": true,
+  "hot_pluggable": true,
+  "singleton": false,
+  "status": "stable",
+  "categories": [
+    "audio",
+    "recorder",
+    "media",
+    "enterprise",
+    "ai-assist"
+  ],
+  "tags": [
+    "语音输入",
+    "录音",
+    "PyAudio",
+    "静音检测",
+    "降噪",
+    "热插拔",
+    "gui",
+    "AI副驾"
+  ],
+  "dependencies": [
+    "pyaudio",
+    "numpy"
+  ],
+  "actions": [
+    {
+      "name": "voice.start",
+      "description": "开始录音",
+      "permission": "user",
+      "aliases": [
+        "开始录音",
+        "启动录音",
+        "录音开始"
+      ]
+    },
+    {
+      "name": "voice.stop",
+      "description": "停止录音",
+      "permission": "user",
+      "aliases": [
+        "停止录音",
+        "结束录音",
+        "录音停止"
+      ]
+    },
+    {
+      "name": "voice.pause",
+      "description": "暂停录音",
+      "permission": "user",
+      "aliases": [
+        "暂停录音",
+        "录音暂停"
+      ]
+    },
+    {
+      "name": "voice.resume",
+      "description": "恢复录音",
+      "permission": "user",
+      "aliases": [
+        "恢复录音",
+        "录音继续"
+      ]
+    },
+    {
+      "name": "voice.save",
+      "description": "保存当前录音为 WAV 文件",
+      "permission": "user",
+      "aliases": [
+        "保存录音",
+        "导出录音"
+      ]
+    },
+    {
+      "name": "voice.status",
+      "description": "查询录音状态",
+      "permission": "user",
+      "aliases": [
+        "录音状态",
+        "录音信息"
+      ]
+    },
+    {
+      "name": "voice.record_until_silence",
+      "description": "录音直到检测到静音",
+      "permission": "user",
+      "aliases": [
+        "静音停止录音",
+        "自动停止录音"
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "voice.start_recording",
+      "description": "开始录音事件"
+    },
+    {
+      "name": "voice.stop_recording",
+      "description": "停止录音事件"
+    },
+    {
+      "name": "voice.pause",
+      "description": "暂停录音事件"
+    },
+    {
+      "name": "voice.resume",
+      "description": "恢复录音事件"
+    },
+    {
+      "name": "voice.save",
+      "description": "保存录音事件"
+    },
+    {
+      "name": "voice.status",
+      "description": "录音状态查询事件"
+    },
+    {
+      "name": "voice.record_until_silence",
+      "description": "静音检测停止录音事件"
+    }
+  ],
+  "config_schema": {
+    "rate": {
+      "type": "integer",
+      "default": 16000,
+      "description": "采样率"
+    },
+    "chunk": {
+      "type": "integer",
+      "default": 1024,
+      "description": "采样块大小"
+    },
+    "channels": {
+      "type": "integer",
+      "default": 1,
+      "description": "声道数"
+    },
+    "silence_threshold": {
+      "type": "integer",
+      "default": 500,
+      "description": "静音阈值（幅度）"
+    },
+    "max_silence_duration": {
+      "type": "number",
+      "default": 1.0,
+      "description": "最大静音时长（秒）"
+    },
+    "max_recording_duration": {
+      "type": "number",
+      "default": 30.0,
+      "description": "最长录音时长（秒）"
+    },
+    "noise_reduction_level": {
+      "type": "number",
+      "default": 0.7,
+      "description": "降噪强度（0~1）"
+    },
+    "normalization": {
+      "type": "boolean",
+      "default": true,
+      "description": "是否归一化音量"
+    },
+    "output_dir": {
+      "type": "string",
+      "default": "~/.local/share/voice_input/recordings",
+      "description": "录音保存目录"
+    },
+    "log_dir": {
+      "type": "string",
+      "default": "~/.local/state/voice_input/logs",
+      "description": "日志目录"
+    }
+  },
+  "market_compatible": true,
+  "upgrade_url": "https://github.com/sanhuajuding/voice_input/releases/latest",
+  "is_entry": true
+}

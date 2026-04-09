@@ -1,0 +1,64 @@
+import os
+import sys
+import asyncio
+import logging
+from pathlib import Path
+
+from core.core2_0.module_loader import ModuleLoader
+from core.core2_0.action_dispatcher import get_global_dispatcher
+from core.core2_0.cli import ApplicationCLI  # 你自定义的 CLI 类，记得路径对
+
+# 日志配置
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S"
+)
+logger = logging.getLogger("三花聚顶-CLI")
+
+def main():
+    try:
+        # 读取模块目录环境变量，默认modules
+        module_dir = os.getenv("MODULES_DIR", "modules")
+        if not Path(module_dir).exists():
+            logger.critical(f"模块目录不存在: {module_dir}")
+            print(f"模块目录不存在: {module_dir}")
+            sys.exit(1)
+
+        # 获取全局 dispatcher 和事件总线，三花聚顶约定两者可同一个对象
+        dispatcher = get_global_dispatcher()
+
+        # 创建模块加载器实例，传入dispatcher和event_bus
+        loader = ModuleLoader(
+            modules_dir=module_dir,
+            dispatcher=dispatcher,
+            event_bus=dispatcher,
+            enable_hotreload=True,
+            log_level=logging.DEBUG
+        )
+
+        # 加载所有模块
+        loaded, failed = loader.load_all_modules()
+        logger.info(f"系统初始化完成，成功加载 {loaded} 个模块，失败 {failed} 个模块")
+        print(f"系统就绪，成功加载 {loaded} 个模块，失败 {failed} 个模块")
+
+        # 创建CLI实例，传入模块加载器
+        cli = ApplicationCLI(loader)
+
+        # 启动命令行交互循环
+        cli.cmdloop()
+
+    except KeyboardInterrupt:
+        print("\n用户中断，系统退出...")
+        try:
+            loader.shutdown()
+        except Exception:
+            pass
+        sys.exit(0)
+    except Exception as e:
+        logger.critical(f"系统启动失败: {str(e)}", exc_info=True)
+        print(f"💥 系统启动失败: {str(e)}")
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()

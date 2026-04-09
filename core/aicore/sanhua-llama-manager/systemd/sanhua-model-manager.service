@@ -1,0 +1,19 @@
+[Unit]
+Description=Sanhua Llama Model Manager (FastAPI)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Environment=PYTHONUNBUFFERED=1
+# 可按需添加模型/参数环境变量：
+# Environment=SANHUA_MODEL=/home/USER/models/qwen2.5-7b-q4_k_m.gguf
+# Environment=SANHUA_SERVER=/home/USER/llama.cpp/build/bin/llama-server
+# Environment=SANHUA_NGL=16
+ExecStart=/usr/bin/bash -lc 'python -m uvicorn server.app:app --host 127.0.0.1 --port 9000'
+Restart=on-failure
+RestartSec=2
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

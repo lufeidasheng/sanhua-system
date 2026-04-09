@@ -1,0 +1,80 @@
+{
+  "name": "code_reader",
+  "version": "2.2.0",
+  "title": "三花聚顶 · 代码结构分析模块（企业增强标准版）",
+  "author": "三花聚顶开发团队",
+  "author_contact": "support@sanhuajuding.com",
+  "description": "为三花聚顶系统提供多语言源码结构分析、文件元数据提取与批量并发分析能力，适配企业级分发器和全局标准动作注册。",
+  "license": "MIT",
+  "repository": "https://github.com/sanhuajuding/code_reader",
+  "entry": "module.py",
+  "entry_class": "modules.code_reader.module.OfficialCodeReaderModule",
+  "enabled": true,
+  "entry_points": [
+    "core",
+    "cli",
+    "gui"
+  ],
+  "icon": "🧑‍💻",
+  "health_check": true,
+  "hot_pluggable": true,
+  "status": "stable",
+  "categories": [
+    "tools",
+    "code-analysis",
+    "reader",
+    "enterprise"
+  ],
+  "tags": [
+    "code",
+    "ast",
+    "reader",
+    "batch",
+    "quality",
+    "python",
+    "js",
+    "安全校验",
+    "多线程"
+  ],
+  "dependencies": [
+    "chardet"
+  ],
+  "actions": [
+    {
+      "name": "code_reader.read_file",
+      "description": "读取文件内容和元数据",
+      "permission": "user"
+    },
+    {
+      "name": "code_reader.analyze_code",
+      "description": "分析代码结构和质量",
+      "permission": "user"
+    },
+    {
+      "name": "code_reader.batch_analyze",
+      "description": "批量分析多个文件结构和质量",
+      "permission": "user"
+    }
+  ],
+  "events": [
+    {
+      "name": "module.loaded",
+      "description": "模块加载完成事件"
+    },
+    {
+      "name": "module.unloaded",
+      "description": "模块卸载事件"
+    }
+  ],
+  "config_schema": {
+    "max_size": {
+      "type": "integer",
+      "default": 5242880,
+      "description": "最大可读取的文件大小（字节）",
+      "minimum": 4096,
+      "maximum": 52428800
+    }
+  },
+  "market_compatible": false,
+  "is_entry": true
+}

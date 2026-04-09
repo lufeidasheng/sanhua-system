@@ -1,0 +1,106 @@
+{
+  "name": "tts_module",
+  "version": "2.4.0",
+  "title": "三花聚顶 · 语音播报模块（云本地双通道极致版）",
+  "author": "三花聚顶开发团队",
+  "author_contact": "support@sanhuajuding.com",
+  "description": "提供文本转语音（TTS）能力，支持本地TTS引擎（piper、espeak-ng、espeak、spd-say、festival）和微软Azure云端TTS，自动/手动切换，支持事件驱动、标准化注册、主控全局热插拔。",
+  "license": "MIT",
+  "repository": "https://github.com/sanhuajuding/tts_module",
+  "entry": "module.py",
+  "entry_class": "modules.tts_module.module.TTSModule",
+  "enabled": true,
+  "entry_points": [
+    "core",
+    "cli",
+    "gui"
+  ],
+  "icon": "🔊",
+  "health_check": true,
+  "hot_pluggable": true,
+  "status": "stable",
+  "categories": [
+    "audio",
+    "tts",
+    "voice",
+    "cloud",
+    "local"
+  ],
+  "tags": [
+    "tts",
+    "voice",
+    "speech",
+    "piper",
+    "espeak",
+    "azure",
+    "edge_tts",
+    "双通道",
+    "热插拔",
+    "event_bus"
+  ],
+  "dependencies": [],
+  "actions": [
+    {
+      "name": "tts.speak",
+      "description": "文本转语音播报（自动切换本地/云端）",
+      "permission": "user",
+      "aliases": [
+        "播报",
+        "说话",
+        "朗读"
+      ]
+    },
+    {
+      "name": "tts.start",
+      "description": "启动TTS模块（置为运行状态）",
+      "permission": "user"
+    },
+    {
+      "name": "tts.stop",
+      "description": "停止TTS模块（置为非运行状态）",
+      "permission": "user"
+    },
+    {
+      "name": "tts.health",
+      "description": "获取TTS模块健康状态",
+      "permission": "user"
+    },
+    {
+      "name": "tts.engine.switch",
+      "description": "切换优先引擎（cloud/local）或设置piper模型路径",
+      "permission": "user"
+    }
+  ],
+  "events": [
+    {
+      "name": "tts.speak",
+      "description": "触发文本播报"
+    }
+  ],
+  "config_schema": {
+    "prefer_cloud": {
+      "type": "boolean",
+      "default": true,
+      "description": "是否优先使用云端TTS（edge_tts）"
+    },
+    "piper_model_path": {
+      "type": "string",
+      "default": "",
+      "description": "piper 模型路径（当本地引擎为 piper 时必填）"
+    },
+    "cloud_player": {
+      "type": "string",
+      "default": "mpv",
+      "description": "播放云端TTS生成音频的播放器"
+    },
+    "cloud_player_args": {
+      "type": "array",
+      "default": [
+        "--no-terminal"
+      ],
+      "description": "播放云端音频的播放器参数"
+    }
+  },
+  "market_compatible": true,
+  "is_entry": true
+}

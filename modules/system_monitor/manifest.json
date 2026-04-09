@@ -1,0 +1,144 @@
+{
+  "name": "system_monitor",
+  "version": "2.1.0",
+  "title": "三花聚顶 · system_monitor 企业级系统监控模块（可选GUI）",
+  "author": "三花聚顶开发团队",
+  "author_contact": "support@sanhuajuding.com",
+  "description": "监控CPU/内存/磁盘/网络/温度并可选显示列表式GUI（10s刷新），支持阈值与动作控制。",
+  "license": "MIT",
+  "repository": "https://github.com/sanhuajuding/system_monitor",
+  "entry": "module.py",
+  "entry_class": "modules.system_monitor.module.OfficialSystemMonitorModule",
+  "enabled": true,
+  "entry_points": [
+    "core",
+    "gui"
+  ],
+  "icon": "🖥️",
+  "health_check": true,
+  "hot_pluggable": true,
+  "singleton": true,
+  "status": "stable",
+  "categories": [
+    "system",
+    "monitoring",
+    "gui"
+  ],
+  "tags": [
+    "监控",
+    "系统",
+    "GUI",
+    "psutil"
+  ],
+  "dependencies": [
+    "psutil"
+  ],
+  "actions": [
+    {
+      "name": "sysmon.status",
+      "description": "获取系统状态摘要",
+      "permission": "user"
+    },
+    {
+      "name": "sysmon.metrics",
+      "description": "获取系统详细指标(JSON)",
+      "permission": "user"
+    },
+    {
+      "name": "sysmon.set_thresholds",
+      "description": "设置监控阈值",
+      "permission": "user"
+    },
+    {
+      "name": "sysmon.set_interval",
+      "description": "设置采样间隔(秒)",
+      "permission": "user"
+    },
+    {
+      "name": "sysmon.ui.open",
+      "description": "打开监控GUI窗口",
+      "permission": "user"
+    },
+    {
+      "name": "sysmon.ui.close",
+      "description": "关闭监控GUI窗口",
+      "permission": "user"
+    },
+    {
+      "name": "system.health_check",
+      "description": "系统健康检查（兼容旧版本与GUI调用）",
+      "permission": "user"
+    },
+    {
+      "name": "get_system_status",
+      "description": "获取系统状态（兼容旧版动作名）",
+      "permission": "user"
+    },
+    {
+      "name": "get_system_metrics",
+      "description": "获取系统指标（兼容旧版动作名）",
+      "permission": "user"
+    }
+  ],
+  "events": [],
+  "config_schema": {
+    "interval_sec": {
+      "type": "number",
+      "default": 10,
+      "description": "采样/刷新周期（秒）"
+    },
+    "history_seconds": {
+      "type": "number",
+      "default": 3600,
+      "description": "历史窗口（秒）"
+    },
+    "thresholds": {
+      "type": "object",
+      "description": "监控阈值配置",
+      "properties": {
+        "cpu": {
+          "type": "number",
+          "default": 85.0
+        },
+        "memory": {
+          "type": "number",
+          "default": 90.0
+        },
+        "disk": {
+          "type": "number",
+          "default": 90.0
+        },
+        "temp": {
+          "type": "number",
+          "default": 80.0
+        },
+        "network_drop": {
+          "type": "number",
+          "default": 10.0
+        }
+      }
+    },
+    "gui": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "是否自动启动GUI"
+        },
+        "refresh_sec": {
+          "type": "number",
+          "default": 10,
+          "description": "GUI刷新间隔（秒）"
+        },
+        "title": {
+          "type": "string",
+          "default": "System Monitor - 三花聚顶"
+        }
+      }
+    }
+  },
+  "market_compatible": true,
+  "upgrade_url": "https://github.com/sanhuajuding/system_monitor/releases/latest",
+  "is_entry": false
+}

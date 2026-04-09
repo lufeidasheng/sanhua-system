@@ -1,0 +1,477 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+三花聚顶 · system_control（企业版/安全特权/最小权限/可观测）
+- 统一以 sys.* 前缀注册动作，避免与现有动作冲突
+- pkexec/Polkit 最小权限执行
+- 超时与错误收敛、输入验证、审计日志
+- Linux 桌面常用系统操作：电源/会话/网络/音量/亮度/蓝牙/显示器/文件与URL/媒体
+"""
+
+from __future__ import annotations
+
+import os
+import re
+import shlex
+import subprocess
+import time
+from typing import Dict, Any, Optional, List, Callable
+
+from core.core2_0.sanhuatongyu.module.base import BaseModule
+from core.core2_0.sanhuatongyu.logger import get_logger
+from core.core2_0.sanhuatongyu.action_dispatcher import dispatcher as ACTION_DISPATCHER
+
+log = get_logger("system_control")
+
+# ======== 常量/校验 ========
+VALID_URL = re.compile(r"^https?://[^\s/$.?#].[^\s]*$")
+BLUETOOTHCTL_TIMEOUT = 30
+
+# ======== 工具函数 ========
+class SystemOperationError(Exception):
+    pass
+
+def _run(cmd: List[str], timeout: int = 10, check: bool = True) -> subprocess.CompletedProcess:
+    """非特权命令执行（可用于用户会话指令）"""
+    log.debug("run: %s", " ".join(shlex.quote(c) for c in cmd))
+    return subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=timeout, check=check)
+
+def _pkexec(cmd: List[str], timeout: int = 10) -> str:
+    """通过 pkexec 提升权限执行（需配置 Polkit 规则）"""
+    try:
+        log.info("pkexec: %s", " ".join(shlex.quote(c) for c in cmd))
+        p = subprocess.run(["pkexec"] + cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=timeout, check=True)
+        return p.stdout.strip()
+    except subprocess.CalledProcessError as e:
+        raise SystemOperationError(f"privileged failed({e.returncode}): {e.stderr.strip() or e.stdout.strip()}") from e
+    except subprocess.TimeoutExpired as e:
+        raise SystemOperationError(f"privileged timeout: {' '.join(cmd)}") from e
+
+def _validate_url(url: str) -> None:
+    if not url or not VALID_URL.match(url):
+        raise ValueError("非法URL格式")
+
+def _validate_path(path: str) -> str:
+    p = os.path.abspath(os.path.expanduser(path))
+    if not os.path.exists(p):
+        raise FileNotFoundError(f"路径不存在: {p}")
+    return p
+
+def _action_exists(name: str) -> bool:
+    try:
+        names = [a["name"] for a in ACTION_DISPATCHER.list_actions(detailed=True)]
+        return name in names
+    except Exception:
+        # 兼容旧调度器
+        return False
+
+# ======== 业务实现 ========
+class _Bluetooth:
+    def __init__(self):
+        self.devices: Dict[str, str] = {}
+        self.last_scan = 0.0
+
+    def _refresh(self):
+        if time.time() - self.last_scan < 300:
+            return
+        try:
+            p = _run(["bluetoothctl", "devices"], timeout=5, check=True)
+            self.devices.clear()
+            for line in p.stdout.splitlines():
+                parts = line.split()
+                if len(parts) >= 3 and parts[0] == "Device":
+                    mac = parts[1]
+                    name = " ".join(parts[2:])
+                    self.devices[mac] = name
+            self.last_scan = time.time()
+        except Exception as e:
+            log.warning("刷新蓝牙设备失败: %s", e)
+
+    def power(self, on: bool) -> str:
+        try:
+            action = "unblock" if on else "block"
+            _pkexec(["rfkill", action, "bluetooth"], timeout=5)
+            return f"蓝牙已{'开启' if on else '关闭'}"
+        except Exception as e:
+            return f"蓝牙切换失败: {e}"
+
+    def connect(self, device_id: str) -> str:
+        if not device_id:
+            return "缺少 device_id"
+        self._refresh()
+        if device_id not in self.devices:
+            return "未知设备ID"
+        try:
+            p = subprocess.run(
+                ["bluetoothctl"],
+                input=f"connect {device_id}\nquit\n",
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=BLUETOOTHCTL_TIMEOUT,
+            )
+            if "Connection successful" in p.stdout:
+                return f"已连接 {self.devices[device_id]}"
+            return "连接失败"
+        except subprocess.TimeoutExpired:
+            return "连接超时"
+        except Exception as e:
+            return f"连接异常: {e}"
+
+class _Audio:
+    @staticmethod
+    def volume_up(step: int = 5) -> str:
+        try:
+            _run(["pactl", "set-sink-volume", "@DEFAULT_SINK@", f"+{step}%"], timeout=3)
+            return f"音量 +{step}%"
+        except Exception as e:
+            return f"音量增加失败: {e}"
+
+    @staticmethod
+    def volume_down(step: int = 5) -> str:
+        try:
+            _run(["pactl", "set-sink-volume", "@DEFAULT_SINK@", f"-{step}%"], timeout=3)
+            return f"音量 -{step}%"
+        except Exception as e:
+            return f"音量降低失败: {e}"
+
+    @staticmethod
+    def mute(mute: bool = True) -> str:
+        try:
+            _run(["pactl", "set-sink-mute", "@DEFAULT_SINK@", "1" if mute else "0"], timeout=3)
+            return "已静音" if mute else "已取消静音"
+        except Exception as e:
+            return f"静音切换失败: {e}"
+
+class _Brightness:
+    @staticmethod
+    def _has_brightnessctl() -> bool:
+        return os.system("command -v brightnessctl >/dev/null 2>&1") == 0
+
+    @classmethod
+    def up(cls, step: int = 5) -> str:
+        try:
+            if cls._has_brightnessctl():
+                _run(["brightnessctl", "set", f"+{step}%"], timeout=3)
+            else:
+                _run(["xbacklight", "-inc", str(step)], timeout=3)
+            return f"亮度 +{step}%"
+        except Exception as e:
+            return f"亮度增加失败: {e}"
+
+    @classmethod
+    def down(cls, step: int = 5) -> str:
+        try:
+            if cls._has_brightnessctl():
+                _run(["brightnessctl", "set", f"{step}%-"], timeout=3)
+            else:
+                _run(["xbacklight", "-dec", str(step)], timeout=3)
+            return f"亮度 -{step}%"
+        except Exception as e:
+            return f"亮度降低失败: {e}"
+
+class _Network:
+    @staticmethod
+    def restart() -> str:
+        try:
+            _pkexec(["nmcli", "connection", "reload"], timeout=5)
+            return "网络配置已重载"
+        except Exception as e:
+            return f"网络重载失败: {e}"
+
+    @staticmethod
+    def wifi(on: bool) -> str:
+        try:
+            _run(["nmcli", "radio", "wifi", "on" if on else "off"], timeout=5)
+            return f"WiFi已{'开启' if on else '关闭'}"
+        except Exception as e:
+            return f"WiFi切换失败: {e}"
+
+    @staticmethod
+    def switch(ssid: str, password: Optional[str] = None) -> str:
+        if not ssid:
+            return "缺少 SSID"
+        try:
+            if password:
+                _run(["nmcli", "dev", "wifi", "connect", ssid, "password", password], timeout=10)
+            else:
+                _run(["nmcli", "dev", "wifi", "connect", ssid], timeout=10)
+            return f"已连接 {ssid}"
+        except Exception as e:
+            return f"切换WiFi失败: {e}"
+
+class _Session:
+    @staticmethod
+    def lock() -> str:
+        try:
+            _run(["loginctl", "lock-session"], timeout=3, check=False)
+            return "已锁屏"
+        except Exception as e:
+            return f"锁屏失败: {e}"
+
+    @staticmethod
+    def logout() -> str:
+        try:
+            _run(["loginctl", "terminate-user", str(os.getuid())], timeout=5)
+            return "已注销"
+        except Exception as e:
+            return f"注销失败: {e}"
+
+    @staticmethod
+    def suspend() -> str:
+        try:
+            _pkexec(["systemctl", "suspend"], timeout=5)
+            return "系统已挂起"
+        except Exception as e:
+            return f"挂起失败: {e}"
+
+    @staticmethod
+    def display_off() -> str:
+        try:
+            _run(["xset", "dpms", "force", "off"], timeout=3, check=False)
+            return "已关闭显示器"
+        except Exception as e:
+            return f"关闭显示器失败: {e}"
+
+class _Power:
+    @staticmethod
+    def reboot() -> str:
+        try:
+            _run([
+                "dbus-send", "--system", "--print-reply",
+                "--dest=org.freedesktop.login1", "/org/freedesktop/login1",
+                "org.freedesktop.login1.Manager.Reboot", "boolean:true"
+            ], timeout=5, check=False)
+        except Exception:
+            pass
+        try:
+            _pkexec(["systemctl", "reboot"], timeout=5)
+            return "系统正在重启"
+        except Exception as e:
+            return f"重启失败: {e}"
+
+    @staticmethod
+    def poweroff() -> str:
+        try:
+            _pkexec(["systemctl", "poweroff"], timeout=5)
+            return "系统正在关机"
+        except Exception as e:
+            return f"关机失败: {e}"
+
+class _Desktop:
+    @staticmethod
+    def open_url(url: str) -> str:
+        try:
+            _validate_url(url)
+            subprocess.Popen(["xdg-open", url], start_new_session=True)
+            return f"已打开: {url}"
+        except Exception as e:
+            return f"打开URL失败: {e}"
+
+    @staticmethod
+    def open_file(path: str) -> str:
+        try:
+            p = _validate_path(path)
+            subprocess.Popen(["xdg-open", p], start_new_session=True)
+            return "已打开文件"
+        except Exception as e:
+            return f"打开文件失败: {e}"
+
+    @staticmethod
+    def play_media(path_or_name: str) -> str:
+        try:
+            if os.path.isabs(path_or_name):
+                p = _validate_path(path_or_name)
+            else:
+                guess = os.path.join(os.path.expanduser("~/Videos"), f"{path_or_name}.mp4")
+                p = _validate_path(guess)
+            subprocess.Popen(["mpv", p, "--no-terminal"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+            return f"正在播放: {os.path.basename(p)}"
+        except Exception as e:
+            return f"播放失败: {e}"
+
+# ======== 模块实现 ========
+class SystemControlModule(BaseModule):
+    """
+    企业版系统控制模块
+    - 以 sys.* 前缀注册动作，避免与其它模块/别名冲突
+    - 实现 handle_event 以满足抽象类要求
+    """
+    VERSION = "2.1.1"
+
+    def __init__(self, meta=None, context=None):
+        super().__init__(meta, context)
+        self.bt = _Bluetooth()
+        self.started = False
+        self.init_ts = time.time()
+
+    # --- 生命周期 ---
+    def preload(self):
+        self._register_actions()
+
+    def setup(self):
+        log.info("system_control setup 完成")
+
+    def start(self):
+        self.started = True
+        log.info("system_control 已启动 (uptime=%.2fs)", time.time() - self.init_ts)
+
+    def stop(self):
+        self.started = False
+        log.info("system_control 已停止")
+
+    def cleanup(self):
+        pass
+
+    def health_check(self) -> Dict[str, Any]:
+        return {
+            "status": "OK",
+            "module": "system_control",
+            "version": self.VERSION,
+            "started": self.started
+        }
+
+    # --- 事件总线（按需）---
+    def handle_event(self, event_name: str, data: Optional[Dict[str, Any]] = None):
+        if not event_name or not event_name.startswith("system."):
+            return None
+        mapping = {
+            "system.reboot": self._act_reboot,
+            "system.poweroff": self._act_poweroff,
+            "system.lock": self._act_lock,
+            "system.logout": self._act_logout,
+            "system.suspend": self._act_suspend,
+            "system.display_off": self._act_display_off,
+        }
+        fn = mapping.get(event_name)
+        if fn:
+            return fn({}, data or {})
+        return None
+
+    # --- 动作注册（注意：不再传 aliases 参数） ---
+    def _maybe_register(self, name: str, func: Callable, description: str):
+        if _action_exists(name):
+            log.info("动作已存在，跳过注册: %s", name)
+            return
+        ACTION_DISPATCHER.register_action(
+            name=name,
+            func=func,
+            description=description,
+            permission="user",
+            module="system_control"
+        )
+
+    def _register_actions(self):
+        # 电源/会话
+        self._maybe_register("sys.reboot", self._act_reboot, "安全重启系统")
+        self._maybe_register("sys.poweroff", self._act_poweroff, "安全关机系统")
+        self._maybe_register("sys.lock", self._act_lock, "锁屏")
+        self._maybe_register("sys.logout", self._act_logout, "注销会话")
+        self._maybe_register("sys.suspend", self._act_suspend, "挂起系统")
+        self._maybe_register("sys.display_off", self._act_display_off, "关闭显示器")
+        # 网络
+        self._maybe_register("sys.net.reload", self._act_net_reload, "重载网络配置")
+        self._maybe_register("sys.wifi.on", self._act_wifi_on, "开启WiFi")
+        self._maybe_register("sys.wifi.off", self._act_wifi_off, "关闭WiFi")
+        self._maybe_register("sys.wifi.switch", self._act_wifi_switch, "切换WiFi SSID")
+        # 蓝牙
+        self._maybe_register("sys.bt.on", self._act_bt_on, "开启蓝牙")
+        self._maybe_register("sys.bt.off", self._act_bt_off, "关闭蓝牙")
+        self._maybe_register("sys.bt.connect", self._act_bt_connect, "连接蓝牙设备")
+        # 音量/亮度
+        self._maybe_register("sys.volume.up", self._act_vol_up, "音量增加")
+        self._maybe_register("sys.volume.down", self._act_vol_down, "音量降低")
+        self._maybe_register("sys.volume.mute", self._act_vol_mute, "静音")
+        self._maybe_register("sys.volume.unmute", self._act_vol_unmute, "取消静音")
+        self._maybe_register("sys.brightness.up", self._act_bri_up, "亮度增加")
+        self._maybe_register("sys.brightness.down", self._act_bri_down, "亮度降低")
+        # 桌面/文件/媒体
+        self._maybe_register("sys.open.url", self._act_open_url, "用默认浏览器打开URL")
+        self._maybe_register("sys.open.file", self._act_open_file, "用默认应用打开文件")
+        self._maybe_register("sys.media.play", self._act_play_media, "播放媒体文件")
+        log.info("system_control 动作注册完成")
+
+    # --- 动作实现 ---
+    # 电源/会话
+    def _act_reboot(self, context, params, **kw):
+        return _Power.reboot()
+
+    def _act_poweroff(self, context, params, **kw):
+        return _Power.poweroff()
+
+    def _act_lock(self, context, params, **kw):
+        return _Session.lock()
+
+    def _act_logout(self, context, params, **kw):
+        return _Session.logout()
+
+    def _act_suspend(self, context, params, **kw):
+        return _Session.suspend()
+
+    def _act_display_off(self, context, params, **kw):
+        return _Session.display_off()
+
+    # 网络
+    def _act_net_reload(self, context, params, **kw):
+        return _Network.restart()
+
+    def _act_wifi_on(self, context, params, **kw):
+        return _Network.wifi(True)
+
+    def _act_wifi_off(self, context, params, **kw):
+        return _Network.wifi(False)
+
+    def _act_wifi_switch(self, context, params, **kw):
+        ssid = (params or {}).get("ssid", "")
+        password = (params or {}).get("password")
+        return _Network.switch(ssid, password)
+
+    # 蓝牙
+    def _act_bt_on(self, context, params, **kw):
+        return self.bt.power(True)
+
+    def _act_bt_off(self, context, params, **kw):
+        return self.bt.power(False)
+
+    def _act_bt_connect(self, context, params, **kw):
+        return self.bt.connect((params or {}).get("device_id", ""))
+
+    # 音量/亮度
+    def _act_vol_up(self, context, params, **kw):
+        step = int((params or {}).get("step", 5))
+        return _Audio.volume_up(step)
+
+    def _act_vol_down(self, context, params, **kw):
+        step = int((params or {}).get("step", 5))
+        return _Audio.volume_down(step)
+
+    def _act_vol_mute(self, context, params, **kw):
+        return _Audio.mute(True)
+
+    def _act_vol_unmute(self, context, params, **kw):
+        return _Audio.mute(False)
+
+    def _act_bri_up(self, context, params, **kw):
+        step = int((params or {}).get("step", 5))
+        return _Brightness.up(step)
+
+    def _act_bri_down(self, context, params, **kw):
+        step = int((params or {}).get("step", 5))
+        return _Brightness.down(step)
+
+    # 桌面/文件/媒体
+    def _act_open_url(self, context, params, **kw):
+        url = (params or {}).get("url", "")
+        return _Desktop.open_url(url)
+
+    def _act_open_file(self, context, params, **kw):
+        path = (params or {}).get("path", "")
+        return _Desktop.open_file(path)
+
+    def _act_play_media(self, context, params, **kw):
+        target = (params or {}).get("target", "")
+        return _Desktop.play_media(target)
+
+
+# 供模块管理器反射
+MODULE_CLASS = SystemControlModule

@@ -1,0 +1,115 @@
+{
+  "name": "reply_dispatcher",
+  "version": "2.1.2",
+  "title": "三花聚顶 · 智能回复分发器（企业标准增强版）",
+  "author": "三花聚顶开发团队",
+  "author_contact": "support@sanhuajuding.com",
+  "description": "为三花聚顶系统提供全局智能回复分发、异步处理、健康监控和自动降级能力，支持标准 func=handler 方式动作注册，企业级线程池与事件驱动。",
+  "license": "MIT",
+  "repository": "https://github.com/sanhuajuding/reply_dispatcher",
+  "entry": "module.py",
+  "entry_class": "modules.reply_dispatcher.module.ReplyDispatcherModule",
+  "enabled": true,
+  "entry_points": [
+    "core",
+    "cli",
+    "gui"
+  ],
+  "icon": "🤖",
+  "health_check": true,
+  "hot_pluggable": true,
+  "status": "stable",
+  "categories": [
+    "nlp",
+    "dispatcher",
+    "tools",
+    "enterprise"
+  ],
+  "tags": [
+    "reply",
+    "dispatcher",
+    "nlp",
+    "async",
+    "健康",
+    "降级",
+    "企业增强"
+  ],
+  "actions": [
+    {
+      "name": "reply",
+      "description": "处理智能回复请求，输入 query，返回 AI 回复内容。",
+      "permission": "user"
+    },
+    {
+      "name": "get_status",
+      "description": "查询模块健康状态和实时运行指标。",
+      "permission": "user"
+    },
+    {
+      "name": "emergency_stop",
+      "description": "执行紧急停止，立即关闭线程池和全部异步任务。",
+      "permission": "admin"
+    }
+  ],
+  "events": [
+    {
+      "name": "module.loaded",
+      "description": "模块加载完成事件"
+    },
+    {
+      "name": "module.unloaded",
+      "description": "模块卸载事件"
+    },
+    {
+      "name": "REPLY_DISPATCHER_DEGRADED",
+      "description": "进入降级模式事件"
+    },
+    {
+      "name": "QUERY_RESULT",
+      "description": "智能回复结果事件"
+    },
+    {
+      "name": "HEALTH_STATUS",
+      "description": "健康状态推送事件"
+    }
+  ],
+  "config_schema": {
+    "max_workers": {
+      "type": "integer",
+      "default": 8,
+      "description": "最大工作线程数",
+      "minimum": 1,
+      "maximum": 32
+    },
+    "reply_timeout": {
+      "type": "integer",
+      "default": 15,
+      "description": "每条回复的最大超时时间（秒）",
+      "minimum": 1,
+      "maximum": 300
+    },
+    "max_queue_size": {
+      "type": "integer",
+      "default": 100,
+      "description": "任务队列最大长度",
+      "minimum": 10,
+      "maximum": 1000
+    },
+    "rate_limit": {
+      "type": "integer",
+      "default": 60,
+      "description": "每分钟最大回复次数",
+      "minimum": 1,
+      "maximum": 10000
+    },
+    "degraded_threshold": {
+      "type": "float",
+      "default": 0.8,
+      "description": "进入降级模式的队列压力阈值",
+      "minimum": 0.1,
+      "maximum": 1.0
+    }
+  },
+  "market_compatible": true,
+  "is_entry": true
+}

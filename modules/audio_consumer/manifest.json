@@ -1,0 +1,114 @@
+{
+  "name": "audio_consumer",
+  "version": "1.0.0",
+  "author": "三花聚顶开发团队",
+  "author_contact": "support@sanhuajuding.com",
+  "description": "基于多进程架构的音频数据消费与流式存储模块，支持自动清理、队列监控和全局标准动作注册。",
+  "license": "Apache-2.0",
+  "repository": "https://github.com/sanhuajuding/audio_consumer",
+  "entry": "module.py",
+  "entry_class": "modules.audio_consumer.module.AudioConsumerModule",
+  "enabled": true,
+  "status": "active",
+  "categories": [
+    "core",
+    "audio",
+    "record",
+    "multiprocess"
+  ],
+  "tags": [
+    "audio",
+    "consumer",
+    "recording",
+    "queue",
+    "multiprocessing"
+  ],
+  "dependencies": [
+    "core.core2_0.sanhuatongyu.module.base",
+    "core.core2_0.sanhuatongyu.action_manager"
+  ],
+  "actions": [
+    {
+      "name": "audio_consumer.start",
+      "display_name": "启动音频录制",
+      "description": "启动音频流数据消费与录制任务。",
+      "permission": "user",
+      "returns": {
+        "type": "dict",
+        "description": "录制进程启动结果与pid"
+      },
+      "entrypoint": "AudioConsumerModule.start_recording"
+    },
+    {
+      "name": "audio_consumer.stop",
+      "display_name": "停止音频录制",
+      "description": "停止当前音频录制任务，返回最后录音文件信息。",
+      "permission": "user",
+      "returns": {
+        "type": "dict",
+        "description": "录音停止结果与文件信息"
+      },
+      "entrypoint": "AudioConsumerModule.stop_recording"
+    },
+    {
+      "name": "audio_consumer.get_last_file",
+      "display_name": "获取最后录音文件",
+      "description": "返回最后一条录音文件的路径。",
+      "permission": "user",
+      "returns": {
+        "type": "string",
+        "description": "最后生成的音频文件路径"
+      },
+      "entrypoint": "AudioConsumerModule.get_last_file"
+    }
+  ],
+  "events": [],
+  "config_schema": {
+    "rate": {
+      "type": "integer",
+      "default": 16000,
+      "description": "采样率"
+    },
+    "chunk": {
+      "type": "integer",
+      "default": 1024,
+      "description": "每帧字节数"
+    },
+    "channels": {
+      "type": "integer",
+      "default": 1,
+      "description": "声道数"
+    },
+    "max_seconds_per_file": {
+      "type": "integer",
+      "default": 3,
+      "description": "单文件最长秒数"
+    },
+    "max_files": {
+      "type": "integer",
+      "default": 100,
+      "description": "最大保留文件数"
+    }
+  },
+  "market_compatible": true,
+  "display_name": "音频数据消费者",
+  "visibility": "core",
+  "hotplug": true,
+  "debug_only": false,
+  "entrypoints": [
+    "preload",
+    "setup",
+    "start",
+    "stop",
+    "cleanup"
+  ],
+  "interfaces": [
+    "BaseModule"
+  ],
+  "compatibility": [
+    "三花聚顶CLI旗舰入口",
+    "三花聚顶GUI旗舰入口"
+  ],
+  "last_update": "2025-08-08T03:50:00+08:00",
+  "is_entry": true
+}

@@ -1,0 +1,19 @@
+{
+    "name": "cli_entry",
+    "version": "1.0.0",
+    "description": "命令行入口模块 - 提供系统控制和调试接口",
+    "entry_points": [
+        "cli"
+    ],
+    "visibility": "interface",
+    "dependencies": [],
+    "enabled": true,
+    "config": {
+        "history_file": ".cli_history",
+        "max_history": 100
+    },
+    "entry_point": "cli_entry.py:main",
+    "is_entry": true,
+    "author": "Auto-Gen",
+    "id": "cli_entry"
+}
