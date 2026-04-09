@@ -1,4 +1,4 @@
-# 聚核助手 (JUJU Assistant)
+# 聚核助手 (JUHE Assistant)
 
 ## 简介
 
