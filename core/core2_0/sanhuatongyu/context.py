@@ -148,7 +148,28 @@ class SystemContext:
         统一动作调用入口。
         CLI/GUI/runtime 均应优先走此接口，避免各入口自行补胶水。
         """
-        return self.action_dispatcher.execute(name, *args, **kwargs)
+        dispatcher = self.action_dispatcher
+
+        params = kwargs.pop("params", None)
+        if params is None and args:
+            first = args[0]
+            if isinstance(first, dict):
+                params = first
+                args = args[1:]
+
+        if hasattr(dispatcher, "call_action"):
+            if args:
+                return dispatcher.execute(name, *args, params=params, **kwargs)
+            return dispatcher.call_action(name, params=params, **kwargs)
+
+        if args:
+            return dispatcher.execute(name, *args, params=params, **kwargs)
+
+        payload: Dict[str, Any] = {}
+        if isinstance(params, dict):
+            payload.update(params)
+        payload.update(kwargs)
+        return dispatcher.execute(name, params=payload)
 
     def list_actions(self, module: Optional[str] = None):
         return self.action_dispatcher.list_actions(module)

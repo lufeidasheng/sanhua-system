@@ -440,9 +440,13 @@ def _wire_decision_support(aicore: Any) -> Any:
             runtime_context=runtime_context,
         )
 
+        dispatcher = self._resolve_dispatcher()
+        context = getattr(dispatcher, "context", None)
+        dispatch_target = context if callable(getattr(context, "call_action", None)) else dispatcher
+
         execution = self.execution_planner.execute(
             plan,
-            dispatcher=self._resolve_dispatcher(),
+            dispatcher=dispatch_target,
             dry_run=dry_run,
             allow_shell=runtime_context.get("allow_shell", False),
             dispatch_context=runtime_context,

@@ -212,108 +212,44 @@ def resolve_dispatcher(aicore: Any):
     return None
 
 
-def get_action_meta(dispatcher: Any, action_name: str):
-    if dispatcher is None:
+def resolve_context(aicore: Any):
+    if aicore is None:
         return None
 
-    getter = getattr(dispatcher, "get_action", None)
-    if callable(getter):
-        try:
-            return getter(action_name)
-        except Exception:
-            return None
-    return None
+    for name in ("context", "ctx"):
+        ctx = getattr(aicore, name, None)
+        if ctx is not None:
+            return ctx
 
-
-def extract_callable(action_meta: Any):
-    if action_meta is None:
-        return None
-
-    for name in ("func", "callable", "handler"):
-        fn = getattr(action_meta, name, None)
-        if callable(fn):
-            return fn
-
-    if callable(action_meta):
-        return action_meta
+    dispatcher = resolve_dispatcher(aicore)
+    if dispatcher is not None:
+        return getattr(dispatcher, "context", None)
 
     return None
-
-
-def call_action_meta(action: str, action_meta: Any, **kwargs):
-    if "action_name" in kwargs:
-        kwargs = dict(kwargs)
-        kwargs.pop("action_name", None)
-    fn = extract_callable(action_meta)
-    if not callable(fn):
-        return {
-            "ok": False,
-            "error": f"action_meta_not_callable:{action}",
-            "action": action,
-        }
-
-    trials = [
-        lambda: fn(**kwargs),
-        lambda: fn(context={}, **kwargs),
-        lambda: fn(context=None, **kwargs),
-        lambda: fn(kwargs=kwargs),
-        lambda: fn(),
-    ]
-
-    last_error = None
-    for trial in trials:
-        try:
-            result = trial()
-            return result if isinstance(result, dict) else {"result": result}
-        except TypeError as e:
-            last_error = e
-            continue
-        except Exception as e:
-            return {"ok": False, "error": str(e), "action": action}
-
-    if last_error is not None:
-        return {"ok": False, "error": str(last_error), "action": action}
-
-    return {"ok": False, "error": f"unknown_meta_call_error:{action}", "action": action}
 
 
 def execute(aicore: Any, action: str, **kwargs):
+    context = resolve_context(aicore)
+    if context is not None:
+        caller = getattr(context, "call_action", None)
+        if callable(caller):
+            try:
+                result = caller(action, params=kwargs)
+                return result if isinstance(result, dict) else {"result": result}
+            except Exception as e:
+                return {"ok": False, "error": str(e), "action": action}
+
     dispatcher = resolve_dispatcher(aicore)
     if dispatcher is None:
         return {}
 
-    meta = get_action_meta(dispatcher, action)
-    if meta is not None:
-        result = call_action_meta(action, meta, **kwargs)
-        if isinstance(result, dict) and not (
-            result.get("ok") is False
-            and "action_meta_not_callable" in str(result.get("error"))
-        ):
-            return result
-
-    for method_name in ("execute", "call_action"):
-        fn = getattr(dispatcher, method_name, None)
-        if not callable(fn):
-            continue
-
-        trials = (
-            lambda: fn(action, **kwargs),
-            lambda: fn(action, kwargs),
-            lambda: fn(action),
-        )
-        last_error = None
-        for trial in trials:
-            try:
-                result = trial()
-                return result if isinstance(result, dict) else {"result": result}
-            except TypeError as e:
-                last_error = e
-                continue
-            except Exception as e:
-                return {"ok": False, "error": str(e), "action": action}
-
-        if last_error is not None:
-            return {"ok": False, "error": str(last_error), "action": action}
+    caller = getattr(dispatcher, "call_action", None)
+    if callable(caller):
+        try:
+            result = caller(action, params=kwargs)
+            return result if isinstance(result, dict) else {"result": result}
+        except Exception as e:
+            return {"ok": False, "error": str(e), "action": action}
 
     return {}
 

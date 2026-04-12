@@ -185,6 +185,25 @@ class QuantumActionDispatcher:
     # =========================
     # 执行（企业统一入口）
     # =========================
+    def call_action(self, name: str, params: Optional[Dict[str, Any]] = None, **kwargs) -> Any:
+        """
+        live 主链标准入口。
+        统一口径：context.call_action(name, params=...) -> dispatcher.call_action(...) -> execute(...)
+        """
+        payload: Dict[str, Any] = {}
+        if isinstance(params, dict):
+            payload.update(params)
+        payload.update(kwargs)
+        return self.execute(name, params=payload)
+
+    def dispatch_action(self, name: str, params: Optional[Dict[str, Any]] = None, **kwargs) -> Any:
+        """
+        历史兼容入口。
+        保留桥接语义，避免被继续当成新的 live 主链真相源。
+        """
+        log.warning("⚠️ dispatch_action 为兼容入口，请优先改用 call_action: %s", name)
+        return self.call_action(name, params=params, **kwargs)
+
     def execute(self, name: str, *args, **kwargs) -> Any:
         with self._actions_lock:
             meta = self._actions.get(name)

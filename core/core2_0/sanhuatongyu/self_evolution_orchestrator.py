@@ -421,6 +421,22 @@ class SelfEvolutionOrchestrator:
 
         return None
 
+    def _get_context(self) -> Any:
+        for name in ("context", "ctx"):
+            try:
+                obj = getattr(self.aicore, name, None)
+                if obj is not None and callable(getattr(obj, "call_action", None)):
+                    return obj
+            except Exception:
+                continue
+
+        dispatcher = self._get_dispatcher()
+        context = getattr(dispatcher, "context", None)
+        if context is not None and callable(getattr(context, "call_action", None)):
+            return context
+
+        return None
+
     def _extract_callable_from_action_meta(self, meta: Any) -> Optional[Any]:
         if meta is None:
             return None
@@ -436,54 +452,43 @@ class SelfEvolutionOrchestrator:
         return None
 
     def _invoke_action(self, action_name: str, **kwargs: Any) -> Dict[str, Any]:
+        context = self._get_context()
+        if context is not None:
+            try:
+                output = context.call_action(action_name, params=kwargs)
+                return {
+                    "status": self._status_from_output(output),
+                    "action_name": action_name,
+                    "output": output,
+                    "bridge_method": "context.call_action(action_name, params=...)",
+                    "invoke_mode": "context.call_action",
+                }
+            except Exception as exc:
+                last_error = str(exc)
+        else:
+            last_error = None
+
         dispatcher = self._get_dispatcher()
         if dispatcher is None:
             return {
                 "status": "failed",
                 "action_name": action_name,
-                "reason": "dispatcher_not_ready",
+                "reason": last_error or "dispatcher_not_ready",
             }
 
-        get_action = getattr(dispatcher, "get_action", None)
-        if callable(get_action):
+        call_action = getattr(dispatcher, "call_action", None)
+        if callable(call_action):
             try:
-                meta = get_action(action_name)
-                fn = self._extract_callable_from_action_meta(meta)
-                if callable(fn):
-                    output, invoke_mode = self._invoke_callable(fn, kwargs)
-                    return {
-                        "status": self._status_from_output(output),
-                        "action_name": action_name,
-                        "output": output,
-                        "bridge_method": "get_action(func)",
-                        "invoke_mode": invoke_mode,
-                    }
-            except Exception as exc:
-                # 回退 execute
-                last_error = str(exc)
-            else:
-                last_error = None
-        else:
-            last_error = None
-
-        execute = getattr(dispatcher, "execute", None)
-        if callable(execute):
-            try:
-                output = execute(action_name, **kwargs)
+                output = call_action(action_name, params=kwargs)
                 return {
                     "status": self._status_from_output(output),
                     "action_name": action_name,
                     "output": output,
-                    "bridge_method": "execute(action_name, **kwargs)",
-                    "invoke_mode": "dispatcher.execute",
+                    "bridge_method": "compat:dispatcher.call_action(action_name, params=...)",
+                    "invoke_mode": "compat:dispatcher.call_action",
                 }
             except Exception as exc:
-                return {
-                    "status": "failed",
-                    "action_name": action_name,
-                    "reason": str(exc),
-                    "bridge_method": "execute(action_name, **kwargs)",
-                }
+                last_error = str(exc)
 
         return {
             "status": "failed",

@@ -27,11 +27,31 @@
 - 等级：高
 - 范围：AICore / Dispatcher / GUI Bridge
 - 现象：
-  - 不同入口可能存在多种调用路径
+  - 历史文档中曾将 `dispatch_action / call_action` 并列写成主调用口
+  - 当前真实口径已收敛为 `context.call_action(...)` 主入口
 - 影响：
   - 调试难、追踪难、验收难
 - 建议：
-  - 统一以 `dispatch_action / call_action` 为主调用口
+  - 统一以 `context.call_action(...)` 为主入口
+  - `dispatcher.call_action / execute` 作为调度桥 / 执行面
+  - `dispatch_action` 仅保留兼容语义
+
+---
+
+### TD-005
+- 标题：默认验证口径需持续保持一致
+- 等级：中
+- 范围：全局协作流程
+- 现象：
+  - 验证命令容易混用系统 `python`、`.venv`、GUI 全量启动、模型服务、音频设备或 `tools` 脚本
+  - `pytest` 已有使用痕迹，但 cache 存在失败记录
+- 影响：
+  - 容易把环境差异误判为代码回归
+- 建议：
+  - 默认解释器为 `./venv/bin/python`
+  - 默认最低验证为 `PYTHONPYCACHEPREFIX=/tmp/pycache ./venv/bin/python -m py_compile ...`
+  - `pytest` 目前只属于 L1 条件项，不是强默认
+  - 不把系统 `python` / `.venv` / GUI 全量启动 / 模型服务 / 音频设备写成默认前提
 
 ---
 

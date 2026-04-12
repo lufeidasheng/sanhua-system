@@ -207,8 +207,7 @@ class SanhuaCmdShell(cmd.Cmd):
                 k, v = a.split("=", 1)
                 kwargs[k] = v
         try:
-            from core.core2_0.sanhuatongyu.action_manager import ACTION_MANAGER
-            res = ACTION_MANAGER.call_action(cmd_real, **kwargs)
+            res = self.context.call_action(cmd_real, params=kwargs)
             print(f"{EMOJI['ok']} {res}")
         except Exception as e:
             print(f"{EMOJI['fail']} 执行失败: {e}")

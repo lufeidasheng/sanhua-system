@@ -162,15 +162,9 @@ def create_system_context(
     else:
         log.info("【context_factory】system.health_check 已存在，无需重复注册")
 
-    # 5. 注入标准分发口 call_action，彻底解耦各入口/模块
-    if not hasattr(context, "call_action"):
-
-        def call_action(name: str, *args, **kwargs):
-            log.info("【context_factory】call_action: %s, args=%s, kwargs=%s", name, args, kwargs)
-            return context.action_dispatcher.execute(name, *args, **kwargs)
-
-        context.call_action = call_action
-        log.info("【context_factory】call_action 已绑定到 context")
+    # 5. call_action 现由 SystemContext 提供标准实现，这里不再重复猴补
+    if hasattr(context, "call_action"):
+        log.info("【context_factory】call_action 已由 SystemContext 提供，无需重复绑定")
 
     log.info("【context_factory】create_system_context 全流程完毕，SystemContext Ready!")
     return context

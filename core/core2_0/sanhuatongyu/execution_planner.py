@@ -374,11 +374,45 @@ class ExecutionPlanner:
             fn = getattr(obj, method_name)
             return fn(*args, **kwargs)
 
+        def _resolve_call_action_target(obj: Any) -> Optional[Any]:
+            if obj is None:
+                return None
+            caller = getattr(obj, "call_action", None)
+            if callable(caller):
+                return obj
+            ctx = getattr(obj, "context", None)
+            caller = getattr(ctx, "call_action", None)
+            if callable(caller):
+                return ctx
+            return None
+
         try:
             context_value, local_params = self._extract_context_payload(step, dispatch_context)
 
             # ----------------------------------------------------
-            # 第一优先级：直接 get_action(func) -> 智能调用
+            # 第一优先级：统一入口 context.call_action(...)
+            # ----------------------------------------------------
+            call_action_target = _resolve_call_action_target(dispatcher)
+            if call_action_target is not None:
+                tried.append("call_action")
+                output = call_action_target.call_action(action_name, params=local_params)
+                ok, reason, final_status = self._normalize_output_status(output)
+
+                payload = {
+                    "step_id": step.step_id,
+                    "title": step.title,
+                    "kind": step.kind,
+                    "status": final_status,
+                    "action_name": action_name,
+                    "output": output,
+                    "bridge_method": "call_action(action_name, params=...)",
+                }
+                if reason:
+                    payload["reason"] = reason
+                return ok, payload
+
+            # ----------------------------------------------------
+            # 兼容兜底：直接 get_action(func) -> 智能调用
             # ----------------------------------------------------
             if hasattr(dispatcher, "get_action"):
                 tried.append("get_action")
@@ -430,7 +464,7 @@ class ExecutionPlanner:
                             "status": final_status,
                             "action_name": action_name,
                             "output": output,
-                            "bridge_method": "get_action(func)",
+                            "bridge_method": "compat:get_action(func)",
                             "invoke_mode": invoke_mode,
                         }
                         if reason:
@@ -438,7 +472,7 @@ class ExecutionPlanner:
                         return ok, payload
 
             # ----------------------------------------------------
-            # 第二优先级：dispatcher.execute(...)
+            # 兼容兜底：dispatcher.execute(...)
             # ----------------------------------------------------
             if hasattr(dispatcher, "execute"):
                 tried.append("execute")
@@ -452,40 +486,11 @@ class ExecutionPlanner:
                     "status": final_status,
                     "action_name": action_name,
                     "output": output,
-                    "bridge_method": "execute(action_name, **params)",
+                    "bridge_method": "compat:execute(action_name, **params)",
                 }
                 if reason:
                     payload["reason"] = reason
                 return ok, payload
-
-            # ----------------------------------------------------
-            # 第三优先级：其它 action API
-            # ----------------------------------------------------
-            for method_name in (
-                "call_action",
-                "dispatch_action",
-                "execute_action",
-                "run_action",
-                "trigger_action",
-                "do_action",
-            ):
-                if hasattr(dispatcher, method_name):
-                    tried.append(method_name)
-                    output = _try_call(dispatcher, method_name, action_name, **local_params)
-                    ok, reason, final_status = self._normalize_output_status(output)
-
-                    payload = {
-                        "step_id": step.step_id,
-                        "title": step.title,
-                        "kind": step.kind,
-                        "status": final_status,
-                        "action_name": action_name,
-                        "output": output,
-                        "bridge_method": method_name,
-                    }
-                    if reason:
-                        payload["reason"] = reason
-                    return ok, payload
 
             return False, {
                 "step_id": step.step_id,

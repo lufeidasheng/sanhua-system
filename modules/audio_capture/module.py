@@ -18,7 +18,7 @@ import pyaudio
 
 from core.core2_0.sanhuatongyu.events import get_event_bus, is_event_bus_initialized
 from core.core2_0.sanhuatongyu.module.base import BaseModule
-from core.core2_0.sanhuatongyu.action_manager import ACTION_MANAGER
+from core.core2_0.sanhuatongyu.action_dispatcher import ACTION_MANAGER
 
 logger = logging.getLogger("audio_capture")
 if not logger.hasHandlers():
