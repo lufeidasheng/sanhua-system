@@ -6,51 +6,50 @@
 ---
 
 ## 当前唯一主工单
-- 工单编号：V2-VERIFY-001
-- 工单标题：统一最小验证口径
-- 所属主链：控制面 / 验证口径
-- 主执行位：2号
+- 工单编号：V2-HEALTH-001
+- 工单标题：统一健康读取主链与 metrics 消费契约
+- 所属主链：健康主链 / metrics 契约
+- 主执行位：1号
 - 状态：已签收 / 已完成
 
 ---
 
 ## 本工单目标
-1. 固化当前默认最小验证口径
-2. 明确 L0 / L1 / L2 验证分层
-3. 明确 04 号位标准验证回包格式
-4. 本轮不改代码，不切下一张代码工单
+1. 收口 `main_controller.py` 健康读取主链到真实模块路径与 `get_system_health()`
+2. 收口 metrics 消费契约
+3. 确保非完整 metrics 输入受控降级
+4. 本轮完成后不预切下一票，进入候选扫描阶段
 
 ---
 
 ## 影响文件
-- docs/NEXT_ACTION.md
-- docs/TECH_DEBT.md
-- docs/COORDINATION_FLOW.md
+- `main_controller.py`
 
 ---
 
 ## 完成定义（DoD）
-- 默认解释器明确为 `./venv/bin/python`
-- 默认最低验证明确为 `PYTHONPYCACHEPREFIX=/tmp/pycache ./venv/bin/python -m py_compile <触达文件>`
-- `pytest` 仅作为 L1 定向验证候选，不作为强默认
-- 不把系统 `python` / `.venv` / GUI 全量启动 / 模型服务 / 音频设备 / `tools` 脚本写成默认验证前提
+- `main_controller.py` 健康读取口径已统一到真实模块路径与 `get_system_health()`
+- 裸导入与错误读取调用已移除
+- metrics 契约已被主循环阈值逻辑正确消费
+- `metrics=None` / 非 list / 缺字段 已受控降级
+- 环境噪音 `psutil` 架构问题与 `daemon` 模块缺失不计入本票拒签理由
+- 本轮不扩大解释为 `system.health_check` 主链、GUI、chat、dispatcher、AICore、memory、modules 已重构
 
 ---
 
 ## 本轮状态结论
-- `V2-VERIFY-001` 本轮已签收 / 已完成
-- 当前最稳定默认口径：
-  - `./venv/bin/python` 作为默认解释器
-  - `PYTHONPYCACHEPREFIX=/tmp/pycache ./venv/bin/python -m py_compile <触达文件>` 作为默认最低验证
-- 验证分层已固化：
-  - L0：静态 / 编译级最小验证
-  - L1：定向纯测试
-  - L2：极小运行态取证
-- `pytest` 已有使用痕迹，但 cache 存在失败记录；当前仅作为 L1 条件项，不作为强默认
-- 不把系统 `python` / `.venv` / GUI 全量启动 / 模型服务 / 音频设备 / `tools` 脚本写成默认验证前提
+- `V2-HEALTH-001` 已签收 / 已完成
+- 本轮签收口径仅限：
+  - `main_controller.py` 健康读取口径已统一到真实模块路径与 `get_system_health()`
+  - metrics 消费契约已收口
+  - 非完整 metrics 输入已受控降级
+- 控制面约束：
+  - 当前无活动主施工票
+  - 已进入下一张唯一主工单候选扫描阶段
+- 本轮不扩大解释为 `system.health_check` 主链、GUI、chat、dispatcher、AICore、memory、modules 已重构
 - 当前判断：
-  - `V2-VERIFY-001` 本轮已完成签收
-  - 当前不切新工单，等待总控下一个派工
+  - `V2-HEALTH-001` 状态为已签收 / 已完成
+  - 当前不切下一张工单
 
 ---
 
