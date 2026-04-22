@@ -1,4 +1,3 @@
-import time
 from typing import Optional
 from .module.base import BaseModule
 from .module.meta import ModuleMeta
@@ -38,9 +37,13 @@ class SystemModule(BaseModule):
         return None
 
     def get_system_status(self) -> dict:
-        uptime = time.time() - self.context.start_time
-        loaded = len(self.context.module_manager.loaded_modules) if self.context.module_manager else 0
-        status = {'status': 'RUNNING', 'modules_loaded': loaded, 'uptime': uptime}
+        reader = getattr(self.context, "get_system_status", None)
+        status = reader() if callable(reader) else {
+            'status': 'UNKNOWN',
+            'system_running': False,
+            'uptime': 0.0,
+            'modules_loaded': 0,
+        }
         self.logger.debug('system_status_report', extra=status)
         return status
 

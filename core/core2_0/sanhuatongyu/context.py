@@ -141,38 +141,129 @@ class SystemContext:
         return self.action_dispatcher.register_action(name, **options)
 
     def execute_action(self, name: str, *args, **kwargs):
+        """
+        Legacy compat 入口：保留旧式位置参数调用，直达 dispatcher.execute(...)。
+        新 live 主链应优先使用 call_action(name, params=...)。
+        """
         return self.action_dispatcher.execute(name, *args, **kwargs)
 
     def call_action(self, name: str, *args, **kwargs):
         """
-        统一动作调用入口。
-        CLI/GUI/runtime 均应优先走此接口，避免各入口自行补胶水。
+        标准动作调用入口。
+        统一口径：context.call_action(name, params=..., **kwargs)
+        -> dispatcher.call_action(name, params=params, **kwargs)
         """
         dispatcher = self.action_dispatcher
 
         params = kwargs.pop("params", None)
-        if params is None and args:
-            first = args[0]
-            if isinstance(first, dict):
-                params = first
-                args = args[1:]
-
-        if hasattr(dispatcher, "call_action"):
-            if args:
-                return dispatcher.execute(name, *args, params=params, **kwargs)
-            return dispatcher.call_action(name, params=params, **kwargs)
-
         if args:
-            return dispatcher.execute(name, *args, params=params, **kwargs)
+            raise TypeError(
+                "SystemContext.call_action 仅支持 params=dict 标准口径；"
+                "旧式位置参数请使用 execute_action(...)"
+            )
 
-        payload: Dict[str, Any] = {}
-        if isinstance(params, dict):
-            payload.update(params)
-        payload.update(kwargs)
-        return dispatcher.execute(name, params=payload)
+        if params is not None and not isinstance(params, dict):
+            raise TypeError("SystemContext.call_action 的 params 必须是 dict 或 None")
 
-    def list_actions(self, module: Optional[str] = None):
-        return self.action_dispatcher.list_actions(module)
+        caller = getattr(dispatcher, "call_action", None)
+        if not callable(caller):
+            raise AttributeError("action_dispatcher 缺少标准 call_action(name, params=...) 接口")
+        return caller(name, params=params, **kwargs)
+
+    def list_actions(self, module: Optional[str] = None, detailed: bool = False):
+        """
+        标准动作发现入口。
+        统一口径：context.list_actions(module=None, detailed=False)
+        -> dispatcher.list_actions(...).
+        缺少 dispatcher 或 list_actions 时返回空列表，供 GUI/fake context 安全降级。
+        """
+        dispatcher = getattr(self, "action_dispatcher", None)
+        lister = getattr(dispatcher, "list_actions", None)
+        if not callable(lister):
+            return []
+
+        try:
+            return lister(module=module, detailed=detailed)
+        except TypeError:
+            if module is not None:
+                return lister(module)
+            try:
+                return lister(detailed=detailed)
+            except TypeError:
+                return lister()
+
+    def get_system_health(self) -> Dict[str, Any]:
+        """
+        标准系统健康读取入口。
+        统一口径：context.get_system_health() -> module_manager.health_check()。
+        缺少 module_manager 或 health_check 时返回稳定降级结构。
+        """
+        module_manager = getattr(self, "module_manager", None)
+        health_check = getattr(module_manager, "health_check", None)
+        if not callable(health_check):
+            return {"status": "unknown", "health": "UNKNOWN", "modules": {}}
+        try:
+            result = health_check()
+        except Exception as e:
+            return {"status": "unknown", "health": "UNKNOWN", "modules": {}, "error": str(e)}
+        if isinstance(result, dict):
+            result.setdefault("modules", {})
+            return result
+        return {"status": "unknown", "health": "UNKNOWN", "modules": {}, "raw": result}
+
+    def get_system_status(self) -> Dict[str, Any]:
+        """
+        轻量系统状态快照读取入口。
+        统一口径：context.get_system_status()。
+        仅返回 status / system_running / uptime / modules_loaded。
+        缺少 start_time / module_manager / loaded_modules 时稳定降级。
+        """
+        system_running = bool(getattr(self, "system_running", False))
+        start_time = getattr(self, "start_time", None)
+        if isinstance(start_time, (int, float)):
+            uptime = max(0.0, time.time() - start_time)
+        else:
+            uptime = 0.0
+
+        module_manager = getattr(self, "module_manager", None)
+        loaded_modules = getattr(module_manager, "loaded_modules", None)
+        if isinstance(loaded_modules, dict):
+            modules_loaded = len(loaded_modules)
+        elif isinstance(loaded_modules, (list, tuple, set)):
+            modules_loaded = len(loaded_modules)
+        else:
+            modules_loaded = 0
+
+        return {
+            "status": "RUNNING" if system_running else "UNKNOWN",
+            "system_running": system_running,
+            "uptime": uptime,
+            "modules_loaded": modules_loaded,
+        }
+
+    def get_loaded_modules(self) -> list[str]:
+        """
+        模块清单读取入口。
+        统一口径：context.get_loaded_modules()。
+        优先走 module_manager.list_all_modules()，否则降级到 loaded_modules。
+        缺少 module_manager / loaded_modules 时返回空列表。
+        """
+        module_manager = getattr(self, "module_manager", None)
+        list_all_modules = getattr(module_manager, "list_all_modules", None)
+        if callable(list_all_modules):
+            try:
+                result = list_all_modules()
+                if isinstance(result, (list, tuple, set)):
+                    return [str(x) for x in result]
+            except Exception:
+                pass
+
+        loaded_modules = getattr(module_manager, "loaded_modules", None)
+        if isinstance(loaded_modules, dict):
+            return [str(x) for x in loaded_modules.keys()]
+        if isinstance(loaded_modules, (list, tuple, set)):
+            return [str(x) for x in loaded_modules]
+        return []
 
     # ---- 🌸 权限+安全风控统一校验接口 ----
     def check_access(self, module: str, action: str, user: str = "system", context: dict = None) -> bool:

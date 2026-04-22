@@ -57,6 +57,9 @@ class TTSModule(BaseModule):
         self._actions_registered = False
         self._running = False
         self._lock = threading.RLock()
+        self._play_token = 0
+        self._current_process: Optional[subprocess.Popen] = None
+        self._current_thread: Optional[threading.Thread] = None
         self.last_engine: Optional[str] = None
 
         logger.info(
@@ -84,9 +87,12 @@ class TTSModule(BaseModule):
     def stop(self):
         with self._lock:
             self._running = False
+            self._play_token += 1
+            self._stop_current_process_locked()
         logger.info("TTS模块已停止")
 
     def cleanup(self):
+        self.stop()
         # 反注册动作（可选）
         try:
             ACTION_DISPATCHER.unregister_action("tts.speak")
@@ -128,6 +134,7 @@ class TTSModule(BaseModule):
                 "local_engine": self.local_engine or "",
                 "prefer_cloud": self.prefer_cloud,
                 "last_engine": self.last_engine or "",
+                "speaking": self._current_process is not None and self._current_process.poll() is None,
             }
 
     # ----------- 主能力：播报 -----------
@@ -136,27 +143,85 @@ class TTSModule(BaseModule):
             return {"status": "fail", "msg": "播报内容不能为空"}
 
         use_cloud = self.cloud_enabled and (self.prefer_cloud if cloud is None else cloud)
+        with self._lock:
+            self._play_token += 1
+            token = self._play_token
+            self._stop_current_process_locked()
 
         # 优先云端
         if use_cloud:
             if not edge_tts:
                 logger.warning("edge_tts 未安装，自动切换本地TTS。")
             else:
-                threading.Thread(target=self._run_cloud_tts, args=(text, lang), daemon=True).start()
-                self.last_engine = "cloud"
+                thread = threading.Thread(target=self._run_cloud_tts, args=(text, lang, token), daemon=True)
+                with self._lock:
+                    self._current_thread = thread
+                    self.last_engine = "cloud"
+                thread.start()
                 return {"status": "ok", "msg": "云端播报已开始"}
 
         # 本地兜底
         if self.local_engine:
-            threading.Thread(target=self._run_local_tts, args=(text, lang), daemon=True).start()
-            self.last_engine = self.local_engine
+            thread = threading.Thread(target=self._run_local_tts, args=(text, lang, token), daemon=True)
+            with self._lock:
+                self._current_thread = thread
+                self.last_engine = self.local_engine
+            thread.start()
             return {"status": "ok", "msg": f"本地({self.local_engine})播报已开始"}
 
         logger.error("未检测到任何可用TTS后端")
         return {"status": "fail", "msg": "未检测到可用TTS后端"}
 
+    def _stop_current_process_locked(self):
+        proc = self._current_process
+        self._current_process = None
+        if proc is None or proc.poll() is not None:
+            return
+        try:
+            proc.terminate()
+            proc.wait(timeout=0.5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            try:
+                proc.wait(timeout=0.5)
+            except Exception:
+                pass
+        except Exception as e:
+            logger.warning(f"TTS 当前播放停止失败: {e}")
+
+    def _token_alive(self, token: int) -> bool:
+        with self._lock:
+            return token == self._play_token
+
+    def _run_process(self, cmd, token: int, **kwargs) -> bool:
+        if not self._token_alive(token):
+            return False
+        kwargs.pop("check", None)
+        stdin_data = kwargs.pop("input", None)
+        if stdin_data is not None:
+            kwargs.setdefault("stdin", subprocess.PIPE)
+        proc = subprocess.Popen(cmd, **kwargs)
+        with self._lock:
+            if token != self._play_token:
+                try:
+                    proc.terminate()
+                except Exception:
+                    pass
+                return False
+            self._current_process = proc
+        try:
+            if stdin_data is not None:
+                proc.communicate(stdin_data)
+            else:
+                proc.wait()
+            return self._token_alive(token)
+        finally:
+            with self._lock:
+                if self._current_process is proc:
+                    self._current_process = None
+
     # ----------- 本地 & 云端 实现 -----------
-    def _run_local_tts(self, text: str, lang: str):
+    def _run_local_tts(self, text: str, lang: str, token: int):
         try:
             eng = self.local_engine
             if eng == "piper":
@@ -164,30 +229,31 @@ class TTSModule(BaseModule):
                     logger.error("piper 被选中但未配置 piper_model_path")
                     return
                 out_file = os.path.join(tempfile.gettempdir(), f"tts_{uuid.uuid4().hex}.wav")
-                subprocess.run(
+                if not self._run_process(
                     ['piper', '--model', self.piper_model_path, '--output_file', out_file, '--text', text],
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False
-                )
+                ):
+                    return
                 # 播放：优先 aplay / paplay / ffplay
                 for player in (["aplay", out_file], ["paplay", out_file], ["ffplay", "-nodisp", "-autoexit", out_file]):
                     if _which(player[0]):
-                        subprocess.Popen(player, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        self._run_process(player, token, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                         break
             elif eng == "espeak-ng":
-                subprocess.run(['espeak-ng', '-v', lang, text], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+                self._run_process(['espeak-ng', '-v', lang, text], token, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             elif eng == "espeak":
-                subprocess.run(['espeak', '-v', lang, text], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+                self._run_process(['espeak', '-v', lang, text], token, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             elif eng == "spd-say":
-                subprocess.run(['spd-say', '-l', lang, text], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+                self._run_process(['spd-say', '-l', lang, text], token, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             elif eng == "festival":
-                subprocess.run(['festival', '--tts'], input=text.encode('utf-8'),
-                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+                self._run_process(['festival', '--tts'], token, input=text.encode('utf-8'),
+                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
             else:
                 logger.warning("没有可用本地TTS后端")
         except Exception as e:
             logger.error(f"本地TTS播报异常: {e}")
 
-    def _run_cloud_tts(self, text: str, lang: str):
+    def _run_cloud_tts(self, text: str, lang: str, token: int):
         try:
             import asyncio
             async def async_speak():
@@ -195,14 +261,16 @@ class TTSModule(BaseModule):
                 communicate = edge_tts.Communicate(text, voice=voice)
                 out_file = os.path.join(tempfile.gettempdir(), f"tts_cloud_{uuid.uuid4().hex}.mp3")
                 await communicate.save(out_file)
+                if not self._token_alive(token):
+                    return
                 # 播放
                 player = self.player_for_cloud if _which(self.player_for_cloud) else None
                 if player:
-                    subprocess.Popen([player, out_file, *self.player_args],
-                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    self._run_process([player, out_file, *self.player_args], token,
+                                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 elif _which("ffplay"):
-                    subprocess.Popen(["ffplay", "-nodisp", "-autoexit", out_file],
-                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    self._run_process(["ffplay", "-nodisp", "-autoexit", out_file], token,
+                                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 else:
                     logger.warning("未找到可用播放器（mpv/ffplay），仅生成了音频文件：%s", out_file)
             asyncio.run(async_speak())

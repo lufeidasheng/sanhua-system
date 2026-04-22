@@ -65,7 +65,9 @@ class SanhuaCmdShell(cmd.Cmd):
         self.prompt = f"[{datetime.now().strftime('%H:%M:%S')}] 三花> "
         self._load_history()
         self._register_cmd_aliases()
-        print(f"🧩 [DEBUG] 启动后已加载模块: {self.context.module_manager.list_all_modules() if self.context.module_manager else '无'}")
+        get_loaded_modules = getattr(self.context, "get_loaded_modules", None)
+        loaded_modules = get_loaded_modules() if callable(get_loaded_modules) else []
+        print(f"🧩 [DEBUG] 启动后已加载模块: {loaded_modules if loaded_modules else '无'}")
         print(f"🖇️ [DEBUG] 启动后可用动作: {list(self.context.list_actions())}")
         print(f"🛎️ [DEBUG] 已注册do_xxx命令: {[m for m in dir(self) if m.startswith('do_')]}")
 
@@ -92,7 +94,8 @@ class SanhuaCmdShell(cmd.Cmd):
 
     # === 系统命令 ===
     def do_list(self, arg):
-        mods = self.context.module_manager.list_all_modules() if self.context.module_manager else []
+        get_loaded_modules = getattr(self.context, "get_loaded_modules", None)
+        mods = get_loaded_modules() if callable(get_loaded_modules) else []
         if not mods:
             print(f"{EMOJI['warn']} 当前无已加载模块")
         else:
@@ -118,7 +121,8 @@ class SanhuaCmdShell(cmd.Cmd):
         return True
 
     def do_health(self, arg):
-        res = self.context.module_manager.health_check() if self.context.module_manager else None
+        health_reader = getattr(self.context, "get_system_health", None)
+        res = health_reader() if callable(health_reader) else {"status": "unknown", "modules": {}}
         if not isinstance(res, dict):
             print(f"{EMOJI['warn']} 健康检查异常：{res}")
             return
@@ -309,8 +313,7 @@ def main():
         system.context.call_action = system.context.execute_action
 
     print(f"🖇️ [DEBUG] 启动前可用动作: {list(system.context.list_actions())}")
-    if system.context.module_manager:
-        print(f"🧩 [DEBUG] 启动前已加载模块: {system.context.module_manager.list_all_modules()}")
+    print(f"🧩 [DEBUG] 启动前已加载模块: {system.context.get_loaded_modules()}")
 
     def _handle_sig(signum, frame):
         print(f"\n{EMOJI['warn']} 收到信号 {signum}，准备退出...")

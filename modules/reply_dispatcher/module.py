@@ -46,11 +46,12 @@ class ReplyDispatcherModule(BaseModule):
         self.lock = threading.RLock()
         self.metrics = self._init_metrics()
         self._event_handlers = {}
-        self._monitor_thread = threading.Thread(
-            target=self._monitor_operations,
-            daemon=True,
-            name="ReplyDispatcher-Monitor"
-        )
+        self._lifecycle_lock = threading.RLock()
+        self._started = False
+        self._thread_pool_shutdown = False
+        self._monitor_thread_started = False
+        self._monitor_stop_event = threading.Event()
+        self._monitor_thread = self._new_monitor_thread()
         self._registered = False
 
     def _init_config(self) -> dict:
@@ -69,6 +70,29 @@ class ReplyDispatcherModule(BaseModule):
             max_workers=self.config['max_workers'],
             thread_name_prefix="ReplyDispatcher-"
         )
+
+    def _new_monitor_thread(self) -> threading.Thread:
+        return threading.Thread(
+            target=self._monitor_operations,
+            daemon=True,
+            name="ReplyDispatcher-Monitor"
+        )
+
+    def _ensure_thread_pool(self) -> None:
+        if self.thread_pool is None or self._thread_pool_shutdown:
+            self.thread_pool = self._init_thread_pool()
+            self._thread_pool_shutdown = False
+
+    def _ensure_monitor_thread(self) -> None:
+        if self._monitor_thread is None:
+            self._monitor_stop_event = threading.Event()
+            self._monitor_thread = self._new_monitor_thread()
+            self._monitor_thread_started = False
+            return
+        if self._monitor_thread_started and not self._monitor_thread.is_alive():
+            self._monitor_stop_event = threading.Event()
+            self._monitor_thread = self._new_monitor_thread()
+            self._monitor_thread_started = False
 
     def _init_metrics(self) -> dict:
         return {
@@ -95,33 +119,60 @@ class ReplyDispatcherModule(BaseModule):
             self._registered = True
 
     def start(self):
-        logger.info("启动 reply_dispatcher")
-        if is_event_bus_initialized():
-            eb = get_event_bus()
-            self._event_handlers["USER_QUERY"] = eb.subscribe("USER_QUERY", self.handle_user_query)
-            self._event_handlers["SYSTEM_HEALTH_CHECK"] = eb.subscribe("SYSTEM_HEALTH_CHECK", self.handle_health_check)
-        if not self._monitor_thread.is_alive():
-            self._monitor_thread.start()
-        self.state = ModuleState.READY
-        logger.info("reply_dispatcher 已就绪")
+        with self._lifecycle_lock:
+            if self._started and ModuleState.is_active(self.state):
+                logger.info("reply_dispatcher 已启动，跳过重复 start")
+                return
+            logger.info("启动 reply_dispatcher")
+            self._ensure_thread_pool()
+            self._ensure_monitor_thread()
+            self.state = ModuleState.READY
+            if is_event_bus_initialized():
+                eb = get_event_bus()
+                if "USER_QUERY" not in self._event_handlers:
+                    self._event_handlers["USER_QUERY"] = eb.subscribe("USER_QUERY", self.handle_user_query)
+                if "SYSTEM_HEALTH_CHECK" not in self._event_handlers:
+                    self._event_handlers["SYSTEM_HEALTH_CHECK"] = eb.subscribe("SYSTEM_HEALTH_CHECK", self.handle_health_check)
+            if self._monitor_thread and not self._monitor_thread.is_alive():
+                self._monitor_thread.start()
+                self._monitor_thread_started = True
+            self._started = True
+            logger.info("reply_dispatcher 已就绪")
 
     def stop(self):
-        logger.info("停止 reply_dispatcher")
-        self.state = ModuleState.SHUTTING_DOWN
-        self.thread_pool.shutdown(wait=True)
-        self._cleanup_event_subscriptions()
+        with self._lifecycle_lock:
+            if not self._started and self._thread_pool_shutdown and self.state == ModuleState.TERMINATED:
+                logger.info("reply_dispatcher 已停止，跳过重复 stop")
+                return
+            logger.info("停止 reply_dispatcher")
+            self.state = ModuleState.TERMINATED
+            self._monitor_stop_event.set()
+            self._cleanup_event_subscriptions()
+            if self.thread_pool is not None and not self._thread_pool_shutdown:
+                self.thread_pool.shutdown(wait=True)
+                self._thread_pool_shutdown = True
+            if self._monitor_thread and self._monitor_thread.is_alive():
+                self._monitor_thread.join(timeout=5)
+            self._monitor_thread = None
+            self._monitor_thread_started = False
+            self._started = False
 
     def on_shutdown(self):
         logger.info("关闭 reply_dispatcher")
-        self.state = ModuleState.TERMINATED
-        if self._monitor_thread.is_alive():
-            self._monitor_thread.join(timeout=5)
+        self.stop()
 
     def emergency_stop(self, **kwargs):
-        logger.critical("执行紧急停止!")
-        self.state = ModuleState.SHUTTING_DOWN
-        self.thread_pool.shutdown(wait=False)
-        self._cleanup_event_subscriptions()
+        with self._lifecycle_lock:
+            logger.critical("执行紧急停止!")
+            self.state = ModuleState.TERMINATED
+            self._monitor_stop_event.set()
+            self._cleanup_event_subscriptions()
+            if self.thread_pool is not None and not self._thread_pool_shutdown:
+                self.thread_pool.shutdown(wait=False)
+                self._thread_pool_shutdown = True
+            self._monitor_thread = None
+            self._monitor_thread_started = False
+            self._started = False
         return {"status": "emergency_stopped"}
 
     def _cleanup_event_subscriptions(self):
@@ -204,14 +255,14 @@ class ReplyDispatcherModule(BaseModule):
         return status
 
     def _monitor_operations(self):
-        while self.state != ModuleState.TERMINATED:
+        while self.state != ModuleState.TERMINATED and not self._monitor_stop_event.is_set():
             try:
                 self._check_timeouts()
                 self._adjust_throughput()
-                time.sleep(5)
+                self._monitor_stop_event.wait(5)
             except Exception as e:
                 logger.error(f"监控线程异常: {str(e)}")
-                time.sleep(10)
+                self._monitor_stop_event.wait(10)
 
     def _check_timeouts(self):
         with self.lock:

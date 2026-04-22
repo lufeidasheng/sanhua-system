@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import time
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from PyQt6.QtWidgets import (
     QDockWidget,
@@ -70,17 +70,15 @@ def _normalize_records(raw: Any) -> List[Dict[str, Any]]:
 
 class MemoryDock(QDockWidget):
     """
-    记忆中心 Dock：
-    - 依赖的 memory_manager 只需要实现:
-      - get_all() -> 任意结构（本类会做归一化）
-      - add_to_category(name: str, item: dict)
-      - clear_all()  (可选，没有则用兜底方案清空 _data 并保存)
-      - export_all() (可选，用于导出原始结构)
+    记忆中心 Dock。
+
+    构造参数保留 memory_manager 名称用于兼容旧调用；生产访问只走
+    context.call_action(...) 标准动作入口。
     """
 
     def __init__(self, memory_manager, parent=None):
         super().__init__("🧠 记忆中心", parent)
-        self.memory = memory_manager
+        self.memory_context = self._resolve_context(memory_manager, parent)
 
         self.setFeatures(
             QDockWidget.DockWidgetFeature.DockWidgetMovable
@@ -114,6 +112,45 @@ class MemoryDock(QDockWidget):
         self.setWidget(w)
         self.refresh()
 
+    def _resolve_context(self, memory_manager: Any, parent: Any) -> Optional[Any]:
+        candidates = [memory_manager, parent]
+        for source in (memory_manager, parent):
+            if source is None:
+                continue
+            candidates.append(getattr(source, "context", None))
+            candidates.append(getattr(source, "ctx", None))
+
+        for candidate in candidates:
+            if candidate is not None and callable(getattr(candidate, "call_action", None)):
+                return candidate
+
+        return None
+
+    def _call_memory_action(self, action: str, params: Optional[Dict[str, Any]] = None) -> Any:
+        if self.memory_context is None:
+            return {"ok": False, "error": "memory context unavailable", "action": action}
+
+        try:
+            return self.memory_context.call_action(action, params=params or {})
+        except Exception as e:
+            return {"ok": False, "error": str(e), "action": action}
+
+    def _snapshot_payload(self) -> Any:
+        result = self._call_memory_action("memory.snapshot", {})
+        if not isinstance(result, dict):
+            return result
+
+        data = result.get("data")
+        if data is not None:
+            return data
+
+        for key in ("snapshot", "records", "items", "memories", "memory"):
+            value = result.get(key)
+            if value is not None:
+                return value
+
+        return result
+
     # ================ 刷新展示 ================
 
     def refresh(self):
@@ -121,13 +158,7 @@ class MemoryDock(QDockWidget):
         self.list.clear()
 
         try:
-            # 优先用 get_all，兼容我们新 MemoryManager 的扁平接口
-            if hasattr(self.memory, "get_all"):
-                raw = self.memory.get_all()
-            elif hasattr(self.memory, "export_all"):
-                raw = self.memory.export_all()
-            else:
-                raw = []
+            raw = self._snapshot_payload()
             records = _normalize_records(raw)
         except Exception as e:
             self.label.setText(f"❌ 记忆加载失败: {e}")
@@ -167,17 +198,12 @@ class MemoryDock(QDockWidget):
             return
 
         try:
-            # 优先尊重 MemoryManager 的原始结构
-            if hasattr(self.memory, "export_all"):
-                payload = self.memory.export_all()
-            else:
-                # 从扁平视图倒推回 {category: [items...]}
-                raw = self.memory.get_all() if hasattr(self.memory, "get_all") else []
-                records = _normalize_records(raw)
-                payload: Dict[str, List[Dict[str, Any]]] = {}
-                for rec in records:
-                    cat = rec.get("category", "default")
-                    payload.setdefault(cat, []).append(rec)
+            raw = self._snapshot_payload()
+            records = _normalize_records(raw)
+            payload: Dict[str, List[Dict[str, Any]]] = {}
+            for rec in records:
+                cat = rec.get("category", "default")
+                payload.setdefault(cat, []).append(rec)
 
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(payload, f, ensure_ascii=False, indent=2)
@@ -212,12 +238,16 @@ class MemoryDock(QDockWidget):
                     if not isinstance(arr, list):
                         arr = [arr]
                     for e in arr:
-                        self.memory.add_to_category(cat, e)
+                        item = dict(e) if isinstance(e, dict) else {"value": e}
+                        item.setdefault("category", str(cat))
+                        self._call_memory_action("memory.add", item)
             elif isinstance(data, list):
                 for e in data:
-                    self.memory.add_to_category("default", e)
+                    item = dict(e) if isinstance(e, dict) else {"value": e}
+                    item.setdefault("category", "default")
+                    self._call_memory_action("memory.add", item)
             else:
-                self.memory.add_to_category("default", {"value": data})
+                self._call_memory_action("memory.add", {"category": "default", "value": data})
 
             self.refresh()
             self.label.setText("✅ 记忆已导入合并")
@@ -237,18 +267,9 @@ class MemoryDock(QDockWidget):
         if ok != QMessageBox.StandardButton.Yes:
             return
 
-        try:
-            if hasattr(self.memory, "clear_all") and callable(self.memory.clear_all):
-                self.memory.clear_all()
-            else:
-                # 兜底：直接清空内部数据并保存（仅在 MemoryManager 是我们那种实现时生效）
-                if hasattr(self.memory, "_data"):
-                    self.memory._data.clear()  # type: ignore[attr-defined]
-                if hasattr(self.memory, "_save") and callable(self.memory._save):
-                    self.memory._save()  # type: ignore[attr-defined]
-
-            self.refresh()
-            self.label.setText("🧹 已清空所有记忆")
-
-        except Exception as e:
-            QMessageBox.critical(self, "清除失败", f"清空记忆时发生错误：{e}")
+        QMessageBox.information(
+            self,
+            "暂不支持",
+            "当前没有已注册的标准记忆清空动作，已跳过清空操作。",
+        )
+        self.label.setText("⚠️ 当前不支持从 GUI 直接清空记忆")

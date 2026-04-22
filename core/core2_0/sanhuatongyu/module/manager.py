@@ -157,15 +157,26 @@ class ModuleManager:
         self.modules: Dict[str, ModuleMeta] = {}
         self.loaded_modules: Dict[str, BaseModule] = {}
 
-        self.observer = Observer()
         self.hotswap_handler = ModuleChangeHandler(self)
-        try:
-            self.observer.schedule(self.hotswap_handler, modules_dir, recursive=True)
-        except Exception as e:
-            self.logger.error("observer_schedule_failed", extra={"error": str(e)})
+        self.observer = None
+        self._observer_needs_rebuild = False
+        self._modules_started = False
+        self._ensure_observer()
 
         # legacy 兼容层
         self.legacy_loader = LegacyModuleManager(context.action_dispatcher)
+
+    def _ensure_observer(self):
+        if self.observer is not None and not self._observer_needs_rebuild:
+            return self.observer
+
+        self.observer = Observer()
+        self._observer_needs_rebuild = False
+        try:
+            self.observer.schedule(self.hotswap_handler, self.modules_dir, recursive=True)
+        except Exception as e:
+            self.logger.error("observer_schedule_failed", extra={"error": str(e)})
+        return self.observer
 
     # === 兼容层 API ===
     def load_legacy_module(self, module_name: str, dependencies: list = None):
@@ -657,7 +668,12 @@ class ModuleManager:
             self.load_single_module(mod_name)
 
     def start_modules(self) -> None:
+        if self._modules_started:
+            self.logger.info("modules_already_started")
+            return
+
         self.logger.info("starting_modules")
+        self._modules_started = True
 
         # 复制 keys，避免 start 内部触发热加载导致 dict 变化
         for mod_name in list(self.loaded_modules.keys()):
@@ -679,17 +695,23 @@ class ModuleManager:
                 self.logger.error("post_start_failed", extra={"module": mod_name, "error": str(e)})
 
         try:
-            if not self.observer.is_alive():
-                self.observer.start()
+            observer = self._ensure_observer()
+            if observer is not None and not observer.is_alive():
+                observer.start()
         except Exception as e:
             self.logger.error("observer_start_failed", extra={"error": str(e)})
 
     def stop_modules(self) -> None:
+        if not self._modules_started:
+            self.logger.info("modules_already_stopped")
+            return
+
         self.logger.info("stopping_modules")
         try:
-            if self.observer.is_alive():
+            if self.observer is not None and self.observer.is_alive():
                 self.observer.stop()
                 self.observer.join()
+                self._observer_needs_rebuild = True
         except Exception as e:
             self.logger.error("observer_stop_failed", extra={"error": str(e)})
 
@@ -712,6 +734,8 @@ class ModuleManager:
                 self.legacy_loader.unload_module(dotted)
             except Exception:
                 pass
+
+        self._modules_started = False
 
     def health_check(self) -> Dict[str, Any]:
         report = {

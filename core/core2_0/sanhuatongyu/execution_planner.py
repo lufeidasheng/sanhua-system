@@ -368,12 +368,6 @@ class ExecutionPlanner:
         action_name = step.action_name
         tried: List[str] = []
 
-        def _try_call(obj: Any, method_name: str, *args, **kwargs):
-            if not hasattr(obj, method_name):
-                raise AttributeError(method_name)
-            fn = getattr(obj, method_name)
-            return fn(*args, **kwargs)
-
         def _resolve_call_action_target(obj: Any) -> Optional[Any]:
             if obj is None:
                 return None
@@ -387,7 +381,7 @@ class ExecutionPlanner:
             return None
 
         try:
-            context_value, local_params = self._extract_context_payload(step, dispatch_context)
+            _context_value, local_params = self._extract_context_payload(step, dispatch_context)
 
             # ----------------------------------------------------
             # 第一优先级：统一入口 context.call_action(...)
@@ -411,94 +405,13 @@ class ExecutionPlanner:
                     payload["reason"] = reason
                 return ok, payload
 
-            # ----------------------------------------------------
-            # 兼容兜底：直接 get_action(func) -> 智能调用
-            # ----------------------------------------------------
-            if hasattr(dispatcher, "get_action"):
-                tried.append("get_action")
-                meta = dispatcher.get_action(action_name)
-                if meta is not None:
-                    fn = getattr(meta, "func", None) or getattr(meta, "handler", None) or meta
-
-                    if callable(fn):
-                        filtered_kwargs, accepts_var_kw = self._filter_kwargs_for_callable(
-                            fn, local_params
-                        )
-
-                        def _invoke_callable(callable_obj: Any):
-                            last_type_error = None
-
-                            candidates = [
-                                ("callable(context=..., **kwargs)",
-                                 lambda: callable_obj(context=context_value, **filtered_kwargs)),
-                                ("callable(**kwargs)",
-                                 lambda: callable_obj(**filtered_kwargs)),
-                                ("callable(context, **kwargs)",
-                                 lambda: callable_obj(context_value, **filtered_kwargs)),
-                                ("callable(context=...)",
-                                 lambda: callable_obj(context=context_value)),
-                                ("callable(context)",
-                                 lambda: callable_obj(context_value)),
-                                ("callable()",
-                                 lambda: callable_obj()),
-                            ]
-
-                            for label, runner in candidates:
-                                try:
-                                    return runner(), label
-                                except TypeError as e:
-                                    last_type_error = e
-                                    continue
-
-                            if last_type_error is not None:
-                                raise last_type_error
-                            raise RuntimeError("callable invoke failed")
-
-                        output, invoke_mode = _invoke_callable(fn)
-                        ok, reason, final_status = self._normalize_output_status(output)
-
-                        payload = {
-                            "step_id": step.step_id,
-                            "title": step.title,
-                            "kind": step.kind,
-                            "status": final_status,
-                            "action_name": action_name,
-                            "output": output,
-                            "bridge_method": "compat:get_action(func)",
-                            "invoke_mode": invoke_mode,
-                        }
-                        if reason:
-                            payload["reason"] = reason
-                        return ok, payload
-
-            # ----------------------------------------------------
-            # 兼容兜底：dispatcher.execute(...)
-            # ----------------------------------------------------
-            if hasattr(dispatcher, "execute"):
-                tried.append("execute")
-                output = _try_call(dispatcher, "execute", action_name, **local_params)
-                ok, reason, final_status = self._normalize_output_status(output)
-
-                payload = {
-                    "step_id": step.step_id,
-                    "title": step.title,
-                    "kind": step.kind,
-                    "status": final_status,
-                    "action_name": action_name,
-                    "output": output,
-                    "bridge_method": "compat:execute(action_name, **params)",
-                }
-                if reason:
-                    payload["reason"] = reason
-                return ok, payload
-
             return False, {
                 "step_id": step.step_id,
                 "title": step.title,
                 "kind": step.kind,
                 "status": "failed",
                 "action_name": action_name,
-                "reason": "dispatcher 未匹配到可用执行接口",
+                "reason": "缺少标准 context.call_action 执行接口",
                 "tried_methods": tried,
                 "dispatcher_type": str(type(dispatcher)),
             }

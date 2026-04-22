@@ -184,34 +184,6 @@ def sanitize_reply_for_writeback(plain_user_text: Any, augmented_prompt: Any, re
     return reply_text[:4000]
 
 
-def resolve_dispatcher(aicore: Any):
-    if aicore is None:
-        return None
-
-    resolver = getattr(aicore, "_resolve_dispatcher", None)
-    if callable(resolver):
-        try:
-            d = resolver()
-            if d is not None:
-                return d
-        except Exception:
-            pass
-
-    for name in ("dispatcher", "action_dispatcher", "ACTION_MANAGER", "action_manager"):
-        d = getattr(aicore, name, None)
-        if d is not None:
-            return d
-
-    try:
-        from core.core2_0.sanhuatongyu.action_dispatcher import ACTION_MANAGER
-        if ACTION_MANAGER is not None:
-            return ACTION_MANAGER
-    except Exception:
-        pass
-
-    return None
-
-
 def resolve_context(aicore: Any):
     if aicore is None:
         return None
@@ -220,10 +192,6 @@ def resolve_context(aicore: Any):
         ctx = getattr(aicore, name, None)
         if ctx is not None:
             return ctx
-
-    dispatcher = resolve_dispatcher(aicore)
-    if dispatcher is not None:
-        return getattr(dispatcher, "context", None)
 
     return None
 
@@ -238,18 +206,6 @@ def execute(aicore: Any, action: str, **kwargs):
                 return result if isinstance(result, dict) else {"result": result}
             except Exception as e:
                 return {"ok": False, "error": str(e), "action": action}
-
-    dispatcher = resolve_dispatcher(aicore)
-    if dispatcher is None:
-        return {}
-
-    caller = getattr(dispatcher, "call_action", None)
-    if callable(caller):
-        try:
-            result = caller(action, params=kwargs)
-            return result if isinstance(result, dict) else {"result": result}
-        except Exception as e:
-            return {"ok": False, "error": str(e), "action": action}
 
     return {}
 

@@ -84,6 +84,10 @@ def _ctx_value(context: Optional[Dict[str, Any]], kwargs: Dict[str, Any], key: s
     return default
 
 
+def _dict_context(context: Any) -> Optional[Dict[str, Any]]:
+    return context if isinstance(context, dict) else None
+
+
 def _ensure_default_session(aicore: Any) -> None:
     fn = getattr(aicore, "_ensure_default_session", None)
     if callable(fn):
@@ -172,7 +176,8 @@ def action_memory_health(*, context: Optional[Dict[str, Any]] = None, **kwargs: 
         }
 
 
-def action_memory_snapshot(*, context: Optional[Dict[str, Any]] = None, **kwargs: Any) -> Dict[str, Any]:
+def action_memory_snapshot(context: Optional[Dict[str, Any]] = None, **kwargs: Any) -> Dict[str, Any]:
+    context = _dict_context(context)
     aicore = _resolve_aicore()
     fn = getattr(aicore, "memory_snapshot", None)
     if not callable(fn):
@@ -274,7 +279,8 @@ def action_memory_add(*, context: Optional[Dict[str, Any]] = None, **kwargs: Any
         }
 
 
-def action_memory_search(*, context: Optional[Dict[str, Any]] = None, **kwargs: Any) -> Dict[str, Any]:
+def action_memory_search(context: Optional[Dict[str, Any]] = None, **kwargs: Any) -> Dict[str, Any]:
+    context = _dict_context(context)
     aicore = _resolve_aicore()
     mm = getattr(aicore, "memory_manager", None)
 
@@ -324,14 +330,16 @@ def action_memory_search(*, context: Optional[Dict[str, Any]] = None, **kwargs: 
     }
 
 
-def action_memory_recall(*, context: Optional[Dict[str, Any]] = None, **kwargs: Any) -> Dict[str, Any]:
+def action_memory_recall(context: Optional[Dict[str, Any]] = None, **kwargs: Any) -> Dict[str, Any]:
+    context = _dict_context(context)
     res = action_memory_search(context=context, **kwargs)
     res["view"] = "memory_recall"
     res["summary"] = f"memory_recall count={res.get('count', 0)} query={res.get('query', '')}"
     return res
 
 
-def action_memory_append_chat(*, context: Optional[Dict[str, Any]] = None, **kwargs: Any) -> Dict[str, Any]:
+def action_memory_append_chat(context: Optional[Dict[str, Any]] = None, **kwargs: Any) -> Dict[str, Any]:
+    context = _dict_context(context)
     aicore = _resolve_aicore()
     role = str(_ctx_value(context, kwargs, "role", "user") or "user")
     content = str(_ctx_value(context, kwargs, "content", "") or "")
@@ -372,7 +380,8 @@ def action_memory_append_chat(*, context: Optional[Dict[str, Any]] = None, **kwa
         }
 
 
-def action_memory_append_action(*, context: Optional[Dict[str, Any]] = None, **kwargs: Any) -> Dict[str, Any]:
+def action_memory_append_action(context: Optional[Dict[str, Any]] = None, **kwargs: Any) -> Dict[str, Any]:
+    context = _dict_context(context)
     aicore = _resolve_aicore()
     action_name = str(_ctx_value(context, kwargs, "action_name", "") or "")
     status = str(_ctx_value(context, kwargs, "status", "success") or "success")

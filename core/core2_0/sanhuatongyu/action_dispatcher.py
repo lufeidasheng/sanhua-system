@@ -201,7 +201,7 @@ class QuantumActionDispatcher:
         历史兼容入口。
         保留桥接语义，避免被继续当成新的 live 主链真相源。
         """
-        log.warning("⚠️ dispatch_action 为兼容入口，请优先改用 call_action: %s", name)
+        log.warning(f"⚠️ dispatch_action 为兼容入口，请优先改用 call_action: {name}")
         return self.call_action(name, params=params, **kwargs)
 
     def execute(self, name: str, *args, **kwargs) -> Any:
